@@ -122,3 +122,21 @@ pub enum IssueSubType {
     Other,
     NotApplicable,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketMakerMode {
+    Normal,
+    Passive,
+    Syndicate,
+    Presyndicate,
+    Penalty
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketParticipantState {
+    Active,
+    Excused,
+    Withdrawn,
+    Suspended,
+    Deleted
+}

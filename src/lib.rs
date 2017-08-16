@@ -36,13 +36,20 @@ pub struct MessageStream<R> {
     bufstart: usize,
     bufend: usize,
     bytes_read: usize,
-    read_calls: usize,
+    read_calls: u32,
+    messages: u32,
 }
 
 impl<R> fmt::Debug for MessageStream<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "MessageStream {{ read_calls: {}, bytes_read: {}, buffer_pos: {} }}",
-               self.read_calls, self.bytes_read, self.bytes_read - (self.bufend - self.bufstart))
+        write!(
+            f,
+            "MessageStream {{ read_calls: {}, bytes_read: {}, buffer_pos: {}, messages: {} }}",
+            self.read_calls,
+            self.bytes_read,
+            self.bytes_read - (self.bufend - self.bufstart),
+            self.messages
+        )
     }
 }
 
@@ -55,7 +62,8 @@ impl<R: Read> MessageStream<R> {
             bufstart: 0,
             bufend: 0,
             bytes_read: 0,
-            read_calls: 0
+            read_calls: 0,
+            messages: 0,
         }
     }
 
@@ -89,11 +97,12 @@ impl<R: Read> Iterator for MessageStream<R> {
             match parse_message(buf) {
                 Done(rest, msg) => {
                     self.bufstart = self.bufend - rest.len();
+                    self.messages += 1;
                     return Some(Ok(msg));
                 }
                 Error(e) => return Some(Err(format!("Parse failed: went wrong: {}", e).into())),
-                                        // .chain_err(|| format!("Stream state: {:?}, slice: {:?}...",
-                                        //                     self, &buf[..50]))),
+                // .chain_err(|| format!("Stream state: {:?}, slice: {:?}...",
+                //                     self, &buf[..50]))),
                 Incomplete(_) => {
                     // fall through to below... necessary to appease borrow checker
                 }
@@ -139,6 +148,17 @@ pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     }
 }
 
+named!(char2bool<bool>, alt!(
+    char!('Y') => {|_| true} |
+    char!('N') => {|_| false}
+));
+
+named!(maybe_char2bool<Option<bool>>, alt!(
+    char!('Y') => {|_| Some(true)} |
+    char!('N') => {|_| Some(false)} |
+    char!(' ') => {|_| None}
+));
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     SystemEvent {
@@ -152,6 +172,7 @@ pub enum Message {
         content: Vec<u8>,
     },
     StockDirectory(StockDirectory),
+    ParticipantPosition(MarketParticipantPosition)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -180,6 +201,7 @@ named!(parse_message<Message>, do_parse!(
     msg: switch!(be_u8,
         b'S' => call!(parse_system_event) |
         b'R' => map!(parse_stock_directory, |sd| Message::StockDirectory(sd)) |
+        b'L' => map!(parse_participant_position, |pp| Message::ParticipantPosition(pp)) |
         other => map!(take!(length - 1),
                       |slice| Message::Unknown {
                           length,
@@ -261,28 +283,79 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
         })
 ));
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketParticipantPosition {
+    stock_locate: u16,
+    tracking_number: u16,
+    timestamp: u64,
+    mpid: String,
+    stock: String,
+    primary_market_maker: bool,
+    market_maker_mode: MarketMakerMode,
+    market_participant_state: MarketParticipantState
+}
 
-named!(char2bool<bool>, alt!(
-    char!('Y') => {|_| true} |
-    char!('N') => {|_| false}
-));
-
-named!(maybe_char2bool<Option<bool>>, alt!(
-    char!('Y') => {|_| Some(true)} |
-    char!('N') => {|_| Some(false)} |
-    char!(' ') => {|_| None}
+named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
+    stock_locate: be_u16 >>
+    tracking_number: be_u16 >>
+    timestamp: be_u48 >>
+    mpid: map!(take_str!(4), |s| s.trim().to_string()) >>
+    stock: map!(take_str!(8), |s| s.trim().to_string()) >>
+    primary_market_maker: char2bool >>
+    market_maker_mode: alt!(
+        char!('N') => {|_| MarketMakerMode::Normal} |
+        char!('P') => {|_| MarketMakerMode::Passive} |
+        char!('S') => {|_| MarketMakerMode::Syndicate} |
+        char!('R') => {|_| MarketMakerMode::Presyndicate} |
+        char!('L') => {|_| MarketMakerMode::Penalty}
+    ) >>
+    market_participant_state: alt!(
+        char!('A') => {|_| MarketParticipantState::Active} |
+        char!('E') => {|_| MarketParticipantState::Excused} |
+        char!('W') => {|_| MarketParticipantState::Withdrawn} |
+        char!('S') => {|_| MarketParticipantState::Suspended} |
+        char!('D') => {|_| MarketParticipantState::Deleted}
+    ) >>
+    (MarketParticipantPosition{
+            stock_locate,
+            tracking_number,
+            timestamp,
+            mpid,
+            stock,
+            primary_market_maker,
+            market_maker_mode,
+            market_participant_state
+    })
 ));
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // for pretty-printing
+    fn bytes2hex(bytes: &[u8]) -> Vec<(char, char)> {
+        fn b2h(b: u8) -> (char, char) {
+            let left = match b >> 4 {
+                v@0...9 => b'0' + v,
+                v@10...15 => b'a' + v - 10,
+                _ => unreachable!()
+            };
+            let right = match b & 0xff {
+                v@0...9 => b'0' + v,
+                v@10...15 => b'a' + v - 10,
+                _ => unreachable!()
+            };
+            (left as char, right as char)
+        }
+        bytes.iter().map(|b| b2h(*b)).collect()
+    }
+
     fn hex_to_bytes(bytes: &[u8]) -> Vec<u8> {
         fn h2b(h: u8) -> Option<u8> {
             match h {
                 v @ b'0'...b'9' => Some(v - b'0'),
                 v @ b'a'...b'f' => Some(v - b'a' + 10),
-                b' ' => None,
+                b' ' | b'\n' => None,
                 _ => panic!("Invalid hex: {}", h as char),
             }
         }
@@ -308,17 +381,28 @@ mod tests {
 
     #[test]
     fn stock_directory() {
-        let code = b"00 0100 0028 9d5b 22a4 1b41 2020 2020 2020 204e 2000 0000 644e 435a 2050 4e20 314e 0000 0000 4e";
+        let code = b"00 0100 0028 9d5b 22a4 1b41 2020 2020 2020 204e 2000
+                     0000 644e 435a 2050 4e20 314e 0000 0000 4e";
         let bytes = hex_to_bytes(&code[..]);
         parse_stock_directory(&bytes[..]).unwrap();
+    }
+
+    #[test]
+    fn market_participant_position() {
+        let code = b"02 bf 00 00 28 9e bc 1a f4 55 41 44 41 4d 42 42 52 59 20 20 20 20 59 4e 41";
+        let bytes = hex_to_bytes(&code[..]);
+        parse_participant_position(&bytes[..]).unwrap();
     }
 
     #[test]
     fn full_parse() {
         let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
-            if let Ok(m@Message::Unknown {..}) = msg {
-                panic!("Message {} unknown: {:?}", ix, m);
+            if let Ok(Message::Unknown { tag, content, .. }) = msg {
+                print!("Message {} tag '{}' unknown: [", ix, tag);
+                for v in content { print!("{:02x} ", v) }
+                println!("]");
+                panic!()
             }
             if let Err(e) = msg {
                 panic!("Mesaage {} failed to parse: {}", ix, e);
