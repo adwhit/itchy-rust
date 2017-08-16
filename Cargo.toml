@@ -5,4 +5,6 @@ version = "0.1.0"
 [dependencies]
 error-chain = "0.10.0"
 flate2 = "0.2.19"
-nom = "3.2.0"
+nom = {version = "3.2.0", features = ["nightly"]}
+
+

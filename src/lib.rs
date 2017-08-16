@@ -7,14 +7,15 @@ extern crate flate2;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
+use std::fmt;
 
 use flate2::read::GzDecoder;
-use nom::{be_u8, be_u16, be_u32, be_u64, print, IResult, Needed};
+use nom::{be_u8, be_u16, be_u32, IResult, Needed};
 
 use errors::*;
 pub use enums::*;
 
-const BUFSIZE: usize = 10 * 1024;
+const BUFSIZE: usize = 200;
 
 mod enums;
 
@@ -29,12 +30,22 @@ pub mod errors {
     }
 }
 
-pub struct MessageStream<R: Read> {
+pub struct MessageStream<R> {
     reader: R,
-    buffer: Box<[u8; BUFSIZE]>, // 10Mb buffer
+    buffer: Box<[u8; BUFSIZE]>,
     bufstart: usize,
     bufend: usize,
+    bytes_read: usize,
+    read_calls: usize,
 }
+
+impl<R> fmt::Debug for MessageStream<R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "MessageStream {{ read_calls: {}, bytes_read: {}, buffer_pos: {} }}",
+               self.read_calls, self.bytes_read, self.bytes_read - (self.bufend - self.bufstart))
+    }
+}
+
 
 impl<R: Read> MessageStream<R> {
     fn new(reader: R) -> MessageStream<R> {
@@ -43,10 +54,13 @@ impl<R: Read> MessageStream<R> {
             buffer: Box::new([0; BUFSIZE]),
             bufstart: 0,
             bufend: 0,
+            bytes_read: 0,
+            read_calls: 0
         }
     }
 
     fn fetch_more_bytes(&mut self) -> Result<usize> {
+        self.read_calls += 1;
         if self.bufend == BUFSIZE {
             // we need more data from the reader
             // first, copy the remnants back to the beginning of the buffer
@@ -54,7 +68,7 @@ impl<R: Read> MessageStream<R> {
             assert!(self.bufstart as usize > BUFSIZE / 2); // safety check
             assert!(BUFSIZE - self.bufstart < 50); // extra careful check
             {
-                let (mut left, right) = self.buffer.split_at_mut(self.bufstart);
+                let (left, right) = self.buffer.split_at_mut(self.bufstart);
                 &left[..right.len()].copy_from_slice(&right[..]);
                 self.bufstart = 0;
                 self.bufend = right.len();
@@ -70,20 +84,26 @@ impl<R: Read> Iterator for MessageStream<R> {
 
     fn next(&mut self) -> Option<Result<Message>> {
         use IResult::*;
-        match parse_message(&self.buffer[self.bufstart..self.bufend]) {
-            Done(rest, msg) => {
-                self.bufstart = self.bufend - rest.len();
-                return Some(Ok(msg));
-            }
-            Error(e) => return Some(Err(errors::Error::from(e))),
-            Incomplete(_) => {
-                // fall through to below... necessary to appease borrow checker
+        {
+            let buf = &self.buffer[self.bufstart..self.bufend];
+            match parse_message(buf) {
+                Done(rest, msg) => {
+                    self.bufstart = self.bufend - rest.len();
+                    return Some(Ok(msg));
+                }
+                Error(e) => return Some(Err(format!("Parse failed: went wrong: {}", e).into())),
+                                        // .chain_err(|| format!("Stream state: {:?}, slice: {:?}...",
+                                        //                     self, &buf[..50]))),
+                Incomplete(_) => {
+                    // fall through to below... necessary to appease borrow checker
+                }
             }
         }
         match self.fetch_more_bytes() {
             Ok(0) => Some(Err("Unexpected EOF".into())),
             Ok(ct) => {
                 self.bufend += ct;
+                self.bytes_read += ct;
                 self.next()
             }
             Err(e) => Some(Err(e)),
@@ -146,7 +166,7 @@ pub struct StockDirectory {
     round_lots_only: bool,
     issue_classification: IssueClassification,
     issue_subtype: IssueSubType,
-    authenticity: (),
+    authenticity: bool,
     short_sale_threshold: Option<bool>,
     ipo_flag: Option<bool>,
     luld_ref_price_tier: LuldRefPriceTier,
@@ -159,7 +179,7 @@ named!(parse_message<Message>, do_parse!(
     length: be_u16 >>
     msg: switch!(be_u8,
         b'S' => call!(parse_system_event) |
-        b'R' => map!(call!(parse_stock_directory), |sd| Message::StockDirectory(sd)) |
+        b'R' => map!(parse_stock_directory, |sd| Message::StockDirectory(sd)) |
         other => map!(take!(length - 1),
                       |slice| Message::Unknown {
                           length,
@@ -214,12 +234,14 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
         ) >>
         round_lot_size: be_u32 >>
         round_lots_only: char2bool >>
-        issue_classification: value!(IssueClassification::Unit, take!(1)) >>
 
         // FIXME these are dummy values
+        issue_classification: value!(IssueClassification::Unit, take!(1)) >>
         issue_subtype: value!(IssueSubType::AlphaIndexETNs, take!(2)) >>
-        authenticity: value!((), char!('P')) >>
-
+        authenticity: alt!(
+            char!('P') => {|_| true} |
+            char!('T') => {|_| false}
+        ) >>
         short_sale_threshold: maybe_char2bool >>
         ipo_flag: maybe_char2bool >>
         luld_ref_price_tier: alt!(
@@ -293,11 +315,13 @@ mod tests {
 
     #[test]
     fn full_parse() {
-        let mut iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
+        let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
+            if let Ok(m@Message::Unknown {..}) = msg {
+                panic!("Message {} unknown: {:?}", ix, m);
+            }
             if let Err(e) = msg {
-                println!("Failed at index {}: {}", ix, e);
-                assert!(false)
+                panic!("Mesaage {} failed to parse: {}", ix, e);
             }
         }
     }
