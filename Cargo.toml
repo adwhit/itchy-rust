@@ -2,9 +2,12 @@
 authors = ["Alex Whitney <adwhit@fastmail.com>"]
 name = "itchy"
 version = "0.1.0"
+
 [dependencies]
+arrayvec = "0.4.0"
 error-chain = "0.10.0"
 flate2 = "0.2.19"
-nom = {version = "3.2.0", features = ["nightly"]}
 
-
+[dependencies.nom]
+features = ["nightly"]
+version = "3.2.0"

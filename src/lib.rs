@@ -3,6 +3,7 @@ extern crate error_chain;
 #[macro_use]
 extern crate nom;
 extern crate flate2;
+extern crate arrayvec;
 
 use std::io::prelude::*;
 use std::fs::File;
@@ -11,6 +12,7 @@ use std::fmt;
 
 use flate2::read::GzDecoder;
 use nom::{be_u8, be_u16, be_u32, IResult, Needed};
+use arrayvec::ArrayString;
 
 use errors::*;
 pub use enums::*;
@@ -211,7 +213,7 @@ named!(parse_message<Message>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StockDirectory {
-    stock: String,
+    stock: ArrayString<[u8; 8]>,
     market_category: MarketCategory,
     financial_status: FinancialStatus,
     round_lot_size: u32,
@@ -240,7 +242,7 @@ named!(parse_system_event<MessageBody>, do_parse!(
 ));
 
 named!(parse_stock_directory<StockDirectory>, do_parse!(
-    stock: map!(take_str!(8), |s| s.trim().to_string()) >>
+    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
     market_category: alt!(
         char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
         char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
@@ -294,16 +296,16 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketParticipantPosition {
-    mpid: String,
-    stock: String,
+    mpid: ArrayString<[u8; 4]>,
+    stock: ArrayString<[u8; 8]>,
     primary_market_maker: bool,
     market_maker_mode: MarketMakerMode,
     market_participant_state: MarketParticipantState
 }
 
 named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
-    mpid: map!(take_str!(4), |s| s.trim().to_string()) >>
-    stock: map!(take_str!(8), |s| s.trim().to_string()) >>
+    mpid: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
+    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
     primary_market_maker: char2bool >>
     market_maker_mode: alt!(
         char!('N') => {|_| MarketMakerMode::Normal} |
