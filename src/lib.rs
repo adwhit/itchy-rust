@@ -162,14 +162,14 @@ named!(maybe_char2bool<Option<bool>>, alt!(
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     header: MsgHeader,
-    body: MessageBody
+    body: MessageBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct MsgHeader {
     stock_locate: u16,
     tracking_number: u16,
-    timestamp: u64
+    timestamp: u64,
 }
 
 named!(parse_message_header<MsgHeader>, do_parse!(
@@ -186,12 +186,12 @@ pub enum MessageBody {
     SystemEvent(EventCode),
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
-        action: RegShoAction
+        action: RegShoAction,
     },
     TradingAction {
         stock: ArrayString<[u8; 8]>,
         trading_state: TradingState,
-        reason: ArrayString<[u8; 4]>
+        reason: ArrayString<[u8; 4]>,
     },
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
@@ -310,7 +310,7 @@ pub struct MarketParticipantPosition {
     stock: ArrayString<[u8; 8]>,
     primary_market_maker: bool,
     market_maker_mode: MarketMakerMode,
-    market_participant_state: MarketParticipantState
+    market_participant_state: MarketParticipantState,
 }
 
 named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
@@ -369,7 +369,7 @@ pub struct AddOrder {
     side: Side,
     shares: u32,
     stock: ArrayString<[u8; 8]>,
-    price: u32
+    price: u32,
 }
 
 named!(parse_add_order<AddOrder>, do_parse!(
@@ -393,14 +393,14 @@ mod tests {
     fn bytes2hex(bytes: &[u8]) -> Vec<(char, char)> {
         fn b2h(b: u8) -> (char, char) {
             let left = match b >> 4 {
-                v@0...9 => b'0' + v,
-                v@10...15 => b'a' + v - 10,
-                _ => unreachable!()
+                v @ 0...9 => b'0' + v,
+                v @ 10...15 => b'a' + v - 10,
+                _ => unreachable!(),
             };
             let right = match b & 0xff {
-                v@0...9 => b'0' + v,
-                v@10...15 => b'a' + v - 10,
-                _ => unreachable!()
+                v @ 0...9 => b'0' + v,
+                v @ 10...15 => b'a' + v - 10,
+                _ => unreachable!(),
             };
             (left as char, right as char)
         }
@@ -468,7 +468,9 @@ mod tests {
                     match msg.body {
                         MessageBody::Unknown { tag, content, .. } => {
                             print!("Message {} tag '{}' unknown: [", ix, tag);
-                            for v in content { print!("{:02x} ", v) }
+                            for v in content {
+                                print!("{:02x} ", v)
+                            }
                             println!("]");
                             panic!()
                         }

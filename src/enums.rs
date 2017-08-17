@@ -129,7 +129,7 @@ pub enum MarketMakerMode {
     Passive,
     Syndicate,
     Presyndicate,
-    Penalty
+    Penalty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +138,7 @@ pub enum MarketParticipantState {
     Excused,
     Withdrawn,
     Suspended,
-    Deleted
+    Deleted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,11 +153,11 @@ pub enum TradingState {
     Halted,
     Paused,
     QuotationOnly,
-    Trading
+    Trading,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Buy,
-    Sell
+    Sell,
 }
