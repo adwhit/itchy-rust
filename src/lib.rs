@@ -183,7 +183,9 @@ named!(parse_message_header<MsgHeader>, do_parse!(
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageBody {
     AddOrder(AddOrder),
-    SystemEvent(EventCode),
+    ReplaceOrder(ReplaceOrder),
+    DeleteOrder { reference: u64 },
+    SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
         action: RegShoAction,
@@ -213,6 +215,8 @@ named!(parse_message<Message>, do_parse!(
         b'Y' => call!(parse_reg_sho_restriction) |
         b'H' => call!(parse_trading_action) |
         b'A' => map!(parse_add_order, |order| MessageBody::AddOrder(order)) |
+        b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
+        b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
         other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
                           length, tag: other as char, content: Vec::from(slice)
@@ -248,7 +252,7 @@ named!(parse_system_event<MessageBody>, do_parse!(
         char!('E') => { |_| EventCode::EndOfSystemHours } |
         char!('C') => { |_| EventCode::EndOfMessages }
     ) >>
-    (MessageBody::SystemEvent(event_code))
+    (MessageBody::SystemEvent{event: event_code})
 ));
 
 named!(parse_stock_directory<StockDirectory>, do_parse!(
@@ -384,28 +388,26 @@ named!(parse_add_order<AddOrder>, do_parse!(
     (AddOrder { reference, side, shares, stock, price })
 ));
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReplaceOrder {
+    old_reference: u64,
+    new_reference: u64,
+    shares: u32,
+    price: u32,
+}
+
+named!(parse_replace_order<ReplaceOrder>, do_parse!(
+    old_reference: be_u64 >>
+    new_reference: be_u64 >>
+    shares: be_u32 >>
+    price: be_u32 >>
+    (ReplaceOrder { old_reference, new_reference, shares, price })
+));
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // for pretty-printing
-    fn bytes2hex(bytes: &[u8]) -> Vec<(char, char)> {
-        fn b2h(b: u8) -> (char, char) {
-            let left = match b >> 4 {
-                v @ 0...9 => b'0' + v,
-                v @ 10...15 => b'a' + v - 10,
-                _ => unreachable!(),
-            };
-            let right = match b & 0xff {
-                v @ 0...9 => b'0' + v,
-                v @ 10...15 => b'a' + v - 10,
-                _ => unreachable!(),
-            };
-            (left as char, right as char)
-        }
-        bytes.iter().map(|b| b2h(*b)).collect()
-    }
 
     fn hex_to_bytes(bytes: &[u8]) -> Vec<u8> {
         fn h2b(h: u8) -> Option<u8> {
@@ -459,6 +461,11 @@ mod tests {
     }
 
     #[test]
+    fn check_sizeof() {
+        assert_eq!(std::mem::size_of::<Message>(), 56)
+    }
+
+    #[test]
     fn full_parse() {
         let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
@@ -474,7 +481,11 @@ mod tests {
                             println!("]");
                             panic!()
                         }
-                        other => {}
+                        _ => {
+                            if ix % 100_000 == 0 {
+                                println!("Processed {} messages", ix)
+                            }
+                        }
                     }
                 }
             }
