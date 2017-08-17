@@ -100,9 +100,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                     self.messages += 1;
                     return Some(Ok(msg));
                 }
-                Error(e) => return Some(Err(format!("Parse failed: went wrong: {}", e).into())),
-                // .chain_err(|| format!("Stream state: {:?}, slice: {:?}...",
-                //                     self, &buf[..50]))),
+                Error(e) => return Some(Err(format!("Parse failed: {}", e).into())),
                 Incomplete(_) => {
                     // fall through to below... necessary to appease borrow checker
                 }
@@ -160,26 +158,59 @@ named!(maybe_char2bool<Option<bool>>, alt!(
 ));
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Message {
-    SystemEvent {
-        tracking_number: u16,
-        timestamp: u64,
-        event_code: EventCode,
-    },
+pub struct Message {
+    header: MsgHeader,
+    body: MessageBody
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MsgHeader {
+    stock_locate: u16,
+    tracking_number: u16,
+    timestamp: u64
+}
+
+named!(parse_message_header<MsgHeader>, do_parse!(
+    stock_locate: be_u16 >>
+    tracking_number: be_u16 >>
+    timestamp: be_u48 >>
+    (MsgHeader { stock_locate, tracking_number, timestamp })
+));
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageBody {
+    SystemEvent(EventCode),
+    //RegShoRestriction(RegShoRestriction),
+    StockDirectory(StockDirectory),
+    ParticipantPosition(MarketParticipantPosition),
     Unknown {
         length: u16,
         tag: char,
         content: Vec<u8>,
     },
-    StockDirectory(StockDirectory),
-    ParticipantPosition(MarketParticipantPosition)
 }
+
+named!(parse_message<Message>, do_parse!(
+    length: be_u16 >>
+    tag: be_u8 >>
+    header: parse_message_header >>
+    body: switch!(value!(tag),  // TODO is this 'value' call necessary?
+                  b'S' => call!(parse_system_event) |
+                  b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
+                  b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
+                  other => map!(take!(length - 1),
+                                |slice| MessageBody::Unknown {
+                                    length,
+                                    tag: other as char,
+                                    content: Vec::from(slice)
+                                })) >>
+    (Message { header, body })
+));
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StockDirectory {
-    stock_locate: u16,
-    tracking_number: u16,
-    timestamp: u64,
     stock: String,
     market_category: MarketCategory,
     financial_status: FinancialStatus,
@@ -196,25 +227,7 @@ pub struct StockDirectory {
     inverse_indicator: bool,
 }
 
-named!(parse_message<Message>, do_parse!(
-    length: be_u16 >>
-    msg: switch!(be_u8,
-        b'S' => call!(parse_system_event) |
-        b'R' => map!(parse_stock_directory, |sd| Message::StockDirectory(sd)) |
-        b'L' => map!(parse_participant_position, |pp| Message::ParticipantPosition(pp)) |
-        other => map!(take!(length - 1),
-                      |slice| Message::Unknown {
-                          length,
-                          tag: other as char,
-                          content: Vec::from(slice)
-                      })) >>
-    (msg)
-));
-
-named!(parse_system_event<Message>, do_parse!(
-    tag!([0, 0]) >>
-    tracking_number: be_u16 >>
-    timestamp: be_u48 >>
+named!(parse_system_event<MessageBody>, do_parse!(
     event_code: alt!(
         char!('O') => { |_| EventCode::StartOfMessages } |
         char!('S') => { |_| EventCode::StartOfSystemHours } |
@@ -223,71 +236,64 @@ named!(parse_system_event<Message>, do_parse!(
         char!('E') => { |_| EventCode::EndOfSystemHours } |
         char!('C') => { |_| EventCode::EndOfMessages }
     ) >>
-    (Message::SystemEvent { tracking_number, timestamp, event_code })
+    (MessageBody::SystemEvent(event_code))
 ));
 
 named!(parse_stock_directory<StockDirectory>, do_parse!(
-    stock_locate: be_u16 >>
-        tracking_number: be_u16 >>
-        timestamp: be_u48 >>
-        stock: map!(take_str!(8), |s| s.trim().to_string()) >>
-        market_category: alt!(
-            char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
-            char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-            char!('S') => { |_| MarketCategory::NasdaqCaptialMarket } |
-            char!('N') => { |_| MarketCategory::Nyse } |
-            char!('A') => { |_| MarketCategory::NyseMkt } |
-            char!('P') => { |_| MarketCategory::NyseArca } |
-            char!('Z') => { |_| MarketCategory::BatsZExchange } |
-            char!(' ') => { |_| MarketCategory::Unavailable }
-        ) >>
-        financial_status: alt!(
-            char!('N') => { |_| FinancialStatus::Normal } |
-            char!('D') => { |_| FinancialStatus::Deficient } |
-            char!('E') => { |_| FinancialStatus::Delinquent } |
-            char!('Q') => { |_| FinancialStatus::Bankrupt } |
-            char!('S') => { |_| FinancialStatus::Suspended } |
-            char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
-            char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
-            char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
-            char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
-            char!('C') => { |_| FinancialStatus::EtpSuspended } |
-            char!(' ') => { |_| FinancialStatus::Unavailable }
-        ) >>
-        round_lot_size: be_u32 >>
-        round_lots_only: char2bool >>
+    stock: map!(take_str!(8), |s| s.trim().to_string()) >>
+    market_category: alt!(
+        char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
+        char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
+        char!('S') => { |_| MarketCategory::NasdaqCaptialMarket } |
+        char!('N') => { |_| MarketCategory::Nyse } |
+        char!('A') => { |_| MarketCategory::NyseMkt } |
+        char!('P') => { |_| MarketCategory::NyseArca } |
+        char!('Z') => { |_| MarketCategory::BatsZExchange } |
+        char!(' ') => { |_| MarketCategory::Unavailable }
+    ) >>
+    financial_status: alt!(
+        char!('N') => { |_| FinancialStatus::Normal } |
+        char!('D') => { |_| FinancialStatus::Deficient } |
+        char!('E') => { |_| FinancialStatus::Delinquent } |
+        char!('Q') => { |_| FinancialStatus::Bankrupt } |
+        char!('S') => { |_| FinancialStatus::Suspended } |
+        char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
+        char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
+        char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
+        char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
+        char!('C') => { |_| FinancialStatus::EtpSuspended } |
+        char!(' ') => { |_| FinancialStatus::Unavailable }
+    ) >>
+    round_lot_size: be_u32 >>
+    round_lots_only: char2bool >>
 
-        // FIXME these are dummy values
-        issue_classification: value!(IssueClassification::Unit, take!(1)) >>
-        issue_subtype: value!(IssueSubType::AlphaIndexETNs, take!(2)) >>
-        authenticity: alt!(
-            char!('P') => {|_| true} |
-            char!('T') => {|_| false}
-        ) >>
-        short_sale_threshold: maybe_char2bool >>
-        ipo_flag: maybe_char2bool >>
-        luld_ref_price_tier: alt!(
-            char!(' ') => { |_| LuldRefPriceTier::Na } |
-            char!('1') => { |_| LuldRefPriceTier::Tier1 } |
-            char!('2') => { |_| LuldRefPriceTier::Tier2 }
-        ) >>
-        etp_flag: maybe_char2bool >>
-        etp_leverage_factor: be_u32 >>
-        inverse_indicator: char2bool >>
-        (StockDirectory {
-            stock_locate, tracking_number, timestamp, stock,
-            market_category, financial_status, round_lot_size,
-            round_lots_only, issue_classification, issue_subtype,
-            authenticity, short_sale_threshold, ipo_flag,
-            luld_ref_price_tier, etp_flag, etp_leverage_factor, inverse_indicator
-        })
+    // FIXME these are dummy values
+    issue_classification: value!(IssueClassification::Unit, take!(1)) >>
+    issue_subtype: value!(IssueSubType::AlphaIndexETNs, take!(2)) >>
+    authenticity: alt!(
+        char!('P') => {|_| true} |
+        char!('T') => {|_| false}
+    ) >>
+    short_sale_threshold: maybe_char2bool >>
+    ipo_flag: maybe_char2bool >>
+    luld_ref_price_tier: alt!(
+        char!(' ') => { |_| LuldRefPriceTier::Na } |
+        char!('1') => { |_| LuldRefPriceTier::Tier1 } |
+        char!('2') => { |_| LuldRefPriceTier::Tier2 }
+    ) >>
+    etp_flag: maybe_char2bool >>
+    etp_leverage_factor: be_u32 >>
+    inverse_indicator: char2bool >>
+    (StockDirectory {
+        stock, market_category, financial_status, round_lot_size,
+        round_lots_only, issue_classification, issue_subtype,
+        authenticity, short_sale_threshold, ipo_flag,
+        luld_ref_price_tier, etp_flag, etp_leverage_factor, inverse_indicator
+    })
 ));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketParticipantPosition {
-    stock_locate: u16,
-    tracking_number: u16,
-    timestamp: u64,
     mpid: String,
     stock: String,
     primary_market_maker: bool,
@@ -296,9 +302,6 @@ pub struct MarketParticipantPosition {
 }
 
 named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
-    stock_locate: be_u16 >>
-    tracking_number: be_u16 >>
-    timestamp: be_u48 >>
     mpid: map!(take_str!(4), |s| s.trim().to_string()) >>
     stock: map!(take_str!(8), |s| s.trim().to_string()) >>
     primary_market_maker: char2bool >>
@@ -317,9 +320,6 @@ named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
         char!('D') => {|_| MarketParticipantState::Deleted}
     ) >>
     (MarketParticipantPosition{
-            stock_locate,
-            tracking_number,
-            timestamp,
             mpid,
             stock,
             primary_market_maker,
@@ -370,10 +370,10 @@ mod tests {
 
     #[test]
     fn system_event() {
-        let code = b"0000 0000 286aab3b3a99 4f";
+        let code = b"4f";
         let bytes = hex_to_bytes(&code[..]);
         let (_, out) = parse_system_event(&bytes[..]).unwrap();
-        if let Message::SystemEvent { .. } = out {
+        if let MessageBody::SystemEvent(EventCode::StartOfMessages) = out {
         } else {
             panic!("Expected SystemEvent,  found {:?}", out)
         }
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn stock_directory() {
-        let code = b"00 0100 0028 9d5b 22a4 1b41 2020 2020 2020 204e 2000
+        let code = b"41 2020 2020 2020 204e 2000
                      0000 644e 435a 2050 4e20 314e 0000 0000 4e";
         let bytes = hex_to_bytes(&code[..]);
         parse_stock_directory(&bytes[..]).unwrap();
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn market_participant_position() {
-        let code = b"02 bf 00 00 28 9e bc 1a f4 55 41 44 41 4d 42 42 52 59 20 20 20 20 59 4e 41";
+        let code = b"41 44 41 4d 42 42 52 59 20 20 20 20 59 4e 41";
         let bytes = hex_to_bytes(&code[..]);
         parse_participant_position(&bytes[..]).unwrap();
     }
@@ -398,14 +398,15 @@ mod tests {
     fn full_parse() {
         let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
-            if let Ok(Message::Unknown { tag, content, .. }) = msg {
-                print!("Message {} tag '{}' unknown: [", ix, tag);
-                for v in content { print!("{:02x} ", v) }
-                println!("]");
-                panic!()
-            }
             if let Err(e) = msg {
                 panic!("Mesaage {} failed to parse: {}", ix, e);
+            } else {
+                if let MessageBody::Unknown { tag, content, .. } = msg.unwrap().body {
+                    print!("Message {} tag '{}' unknown: [", ix, tag);
+                    for v in content { print!("{:02x} ", v) }
+                    println!("]");
+                    panic!()
+                }
             }
         }
     }
