@@ -183,13 +183,16 @@ named!(parse_message_header<MsgHeader>, do_parse!(
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageBody {
     SystemEvent(EventCode),
-    //RegShoRestriction(RegShoRestriction),
+    RegShoRestriction {
+        stock: ArrayString<[u8; 8]>,
+        action: RegShoAction
+    },
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
     Unknown {
         length: u16,
         tag: char,
-        content: Vec<u8>,
+        content: Vec<u8>, // TODO yuck, allocation
     },
 }
 
@@ -198,15 +201,14 @@ named!(parse_message<Message>, do_parse!(
     tag: be_u8 >>
     header: parse_message_header >>
     body: switch!(value!(tag),  // TODO is this 'value' call necessary?
-                  b'S' => call!(parse_system_event) |
-                  b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
-                  b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
-                  other => map!(take!(length - 1),
-                                |slice| MessageBody::Unknown {
-                                    length,
-                                    tag: other as char,
-                                    content: Vec::from(slice)
-                                })) >>
+        b'S' => call!(parse_system_event) |
+        b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
+        b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
+        b'Y' => call!(parse_reg_sho_restriction) |
+        other => map!(take!(length - 1),
+                      |slice| MessageBody::Unknown {
+                          length, tag: other as char, content: Vec::from(slice)
+        })) >>
     (Message { header, body })
 ));
 
@@ -328,6 +330,16 @@ named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
             market_maker_mode,
             market_participant_state
     })
+));
+
+named!(parse_reg_sho_restriction<MessageBody>, do_parse!(
+    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    action: alt!(
+        char!('0') => {|_| RegShoAction::None} |
+        char!('1') => {|_| RegShoAction::Intraday} |
+        char!('2') => {|_| RegShoAction::Extant}
+    ) >>
+    (MessageBody::RegShoRestriction { stock, action })
 ));
 
 #[cfg(test)]

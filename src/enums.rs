@@ -140,3 +140,10 @@ pub enum MarketParticipantState {
     Suspended,
     Deleted
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegShoAction {
+    None,
+    Intraday,
+    Extant,
+}
