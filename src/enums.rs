@@ -147,3 +147,17 @@ pub enum RegShoAction {
     Intraday,
     Extant,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradingState {
+    Halted,
+    Paused,
+    QuotationOnly,
+    Trading
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Buy,
+    Sell
+}

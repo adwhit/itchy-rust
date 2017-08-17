@@ -11,7 +11,7 @@ use std::path::Path;
 use std::fmt;
 
 use flate2::read::GzDecoder;
-use nom::{be_u8, be_u16, be_u32, IResult, Needed};
+use nom::{be_u8, be_u16, be_u32, be_u64, IResult, Needed};
 use arrayvec::ArrayString;
 
 use errors::*;
@@ -182,10 +182,16 @@ named!(parse_message_header<MsgHeader>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageBody {
+    AddOrder(AddOrder),
     SystemEvent(EventCode),
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
         action: RegShoAction
+    },
+    TradingAction {
+        stock: ArrayString<[u8; 8]>,
+        trading_state: TradingState,
+        reason: ArrayString<[u8; 4]>
     },
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
@@ -205,7 +211,9 @@ named!(parse_message<Message>, do_parse!(
         b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
         b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
         b'Y' => call!(parse_reg_sho_restriction) |
-        other => map!(take!(length - 1),
+        b'H' => call!(parse_trading_action) |
+        b'A' => map!(parse_add_order, |order| MessageBody::AddOrder(order)) |
+        other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
                           length, tag: other as char, content: Vec::from(slice)
         })) >>
@@ -342,6 +350,41 @@ named!(parse_reg_sho_restriction<MessageBody>, do_parse!(
     (MessageBody::RegShoRestriction { stock, action })
 ));
 
+named!(parse_trading_action<MessageBody>, do_parse!(
+    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    trading_state: alt!(
+        char!('H') => {|_| TradingState::Halted} |
+        char!('P') => {|_| TradingState::Paused} |
+        char!('Q') => {|_| TradingState::QuotationOnly} |
+        char!('T') => {|_| TradingState::Trading}
+    ) >> be_u8 >> // skip reserved byte
+    reason: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
+    (MessageBody::TradingAction { stock, trading_state, reason })
+));
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddOrder {
+    reference: u64,
+    side: Side,
+    shares: u32,
+    stock: ArrayString<[u8; 8]>,
+    price: u32
+}
+
+named!(parse_add_order<AddOrder>, do_parse!(
+    reference: be_u64 >>
+    side: alt!(
+        char!('B') => {|_| Side::Buy} |
+        char!('S') => {|_| Side::Sell}
+    ) >>
+    shares: be_u32 >>
+    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    price: be_u32 >>
+    (AddOrder { reference, side, shares, stock, price })
+));
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,11 +429,8 @@ mod tests {
     fn system_event() {
         let code = b"4f";
         let bytes = hex_to_bytes(&code[..]);
-        let (_, out) = parse_system_event(&bytes[..]).unwrap();
-        if let MessageBody::SystemEvent(EventCode::StartOfMessages) = out {
-        } else {
-            panic!("Expected SystemEvent,  found {:?}", out)
-        }
+        let (rest, _) = parse_system_event(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
     }
 
     #[test]
@@ -398,28 +438,42 @@ mod tests {
         let code = b"41 2020 2020 2020 204e 2000
                      0000 644e 435a 2050 4e20 314e 0000 0000 4e";
         let bytes = hex_to_bytes(&code[..]);
-        parse_stock_directory(&bytes[..]).unwrap();
+        let (rest, _) = parse_stock_directory(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
     }
 
     #[test]
     fn market_participant_position() {
         let code = b"41 44 41 4d 42 42 52 59 20 20 20 20 59 4e 41";
         let bytes = hex_to_bytes(&code[..]);
-        parse_participant_position(&bytes[..]).unwrap();
+        let (rest, _) = parse_participant_position(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn add_order() {
+        let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_add_order(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
     }
 
     #[test]
     fn full_parse() {
         let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
-            if let Err(e) = msg {
-                panic!("Mesaage {} failed to parse: {}", ix, e);
-            } else {
-                if let MessageBody::Unknown { tag, content, .. } = msg.unwrap().body {
-                    print!("Message {} tag '{}' unknown: [", ix, tag);
-                    for v in content { print!("{:02x} ", v) }
-                    println!("]");
-                    panic!()
+            match msg {
+                Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
+                Ok(msg) => {
+                    match msg.body {
+                        MessageBody::Unknown { tag, content, .. } => {
+                            print!("Message {} tag '{}' unknown: [", ix, tag);
+                            for v in content { print!("{:02x} ", v) }
+                            println!("]");
+                            panic!()
+                        }
+                        other => {}
+                    }
                 }
             }
         }
