@@ -161,3 +161,18 @@ pub enum Side {
     Buy,
     Sell,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImbalanceDirection {
+    Buy,
+    Sell,
+    NoImbalance,
+    InsufficientOrders
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrossType {
+    Opening,
+    Closing,
+    IpoOrHalted
+}

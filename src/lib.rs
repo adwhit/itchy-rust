@@ -148,6 +148,15 @@ pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Price(u32);
+
+impl From<u32> for Price {
+    fn from(v: u32) -> Price {
+        Price(v)
+    }
+}
+
 named!(char2bool<bool>, alt!(
     char!('Y') => {|_| true} |
     char!('N') => {|_| false}
@@ -159,6 +168,8 @@ named!(maybe_char2bool<Option<bool>>, alt!(
     char!(' ') => {|_| None}
 ));
 
+named!(stock<ArrayString<[u8; 8]>>, map!(take_str!(8), |s| ArrayString::from(s).unwrap()));
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     header: MsgHeader,
@@ -167,16 +178,18 @@ pub struct Message {
 
 #[derive(Debug, Clone, PartialEq)]
 struct MsgHeader {
+    tag: u8,
     stock_locate: u16,
     tracking_number: u16,
     timestamp: u64,
 }
 
 named!(parse_message_header<MsgHeader>, do_parse!(
+    tag: be_u8 >>
     stock_locate: be_u16 >>
     tracking_number: be_u16 >>
     timestamp: be_u48 >>
-    (MsgHeader { stock_locate, tracking_number, timestamp })
+    (MsgHeader { tag, stock_locate, tracking_number, timestamp })
 ));
 
 
@@ -185,6 +198,7 @@ pub enum MessageBody {
     AddOrder(AddOrder),
     ReplaceOrder(ReplaceOrder),
     DeleteOrder { reference: u64 },
+    Imbalance(ImbalanceIndicator),
     SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
@@ -199,16 +213,14 @@ pub enum MessageBody {
     ParticipantPosition(MarketParticipantPosition),
     Unknown {
         length: u16,
-        tag: char,
         content: Vec<u8>, // TODO yuck, allocation
     },
 }
 
 named!(parse_message<Message>, do_parse!(
     length: be_u16 >>
-    tag: be_u8 >>
     header: parse_message_header >>
-    body: switch!(value!(tag),  // TODO is this 'value' call necessary?
+    body: switch!(value!(header.tag),  // TODO is this 'value' call necessary?
         b'S' => call!(parse_system_event) |
         b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
         b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
@@ -217,9 +229,10 @@ named!(parse_message<Message>, do_parse!(
         b'A' => map!(parse_add_order, |order| MessageBody::AddOrder(order)) |
         b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
+        b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
         other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
-                          length, tag: other as char, content: Vec::from(slice)
+                          length, content: Vec::from(slice)
         })) >>
     (Message { header, body })
 ));
@@ -256,7 +269,7 @@ named!(parse_system_event<MessageBody>, do_parse!(
 ));
 
 named!(parse_stock_directory<StockDirectory>, do_parse!(
-    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    stock: stock >>
     market_category: alt!(
         char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
         char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
@@ -283,9 +296,10 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
     round_lot_size: be_u32 >>
     round_lots_only: char2bool >>
 
-    // FIXME these are dummy values
+    // TODO these are dummy values, parse the char properly
     issue_classification: value!(IssueClassification::Unit, take!(1)) >>
     issue_subtype: value!(IssueSubType::AlphaIndexETNs, take!(2)) >>
+
     authenticity: alt!(
         char!('P') => {|_| true} |
         char!('T') => {|_| false}
@@ -319,7 +333,7 @@ pub struct MarketParticipantPosition {
 
 named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
     mpid: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
-    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    stock: stock >>
     primary_market_maker: char2bool >>
     market_maker_mode: alt!(
         char!('N') => {|_| MarketMakerMode::Normal} |
@@ -345,7 +359,7 @@ named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
 ));
 
 named!(parse_reg_sho_restriction<MessageBody>, do_parse!(
-    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    stock: stock >>
     action: alt!(
         char!('0') => {|_| RegShoAction::None} |
         char!('1') => {|_| RegShoAction::Intraday} |
@@ -355,7 +369,7 @@ named!(parse_reg_sho_restriction<MessageBody>, do_parse!(
 ));
 
 named!(parse_trading_action<MessageBody>, do_parse!(
-    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    stock: stock >>
     trading_state: alt!(
         char!('H') => {|_| TradingState::Halted} |
         char!('P') => {|_| TradingState::Paused} |
@@ -373,7 +387,7 @@ pub struct AddOrder {
     side: Side,
     shares: u32,
     stock: ArrayString<[u8; 8]>,
-    price: u32,
+    price: Price,
 }
 
 named!(parse_add_order<AddOrder>, do_parse!(
@@ -383,9 +397,9 @@ named!(parse_add_order<AddOrder>, do_parse!(
         char!('S') => {|_| Side::Sell}
     ) >>
     shares: be_u32 >>
-    stock: map!(take_str!(8), |s| ArrayString::from(s).unwrap()) >>
+    stock: stock >>
     price: be_u32 >>
-    (AddOrder { reference, side, shares, stock, price })
+    (AddOrder { reference, side, shares, stock, price: price.into() })
 ));
 
 #[derive(Debug, Clone, PartialEq)]
@@ -393,7 +407,7 @@ pub struct ReplaceOrder {
     old_reference: u64,
     new_reference: u64,
     shares: u32,
-    price: u32,
+    price: Price,
 }
 
 named!(parse_replace_order<ReplaceOrder>, do_parse!(
@@ -401,9 +415,51 @@ named!(parse_replace_order<ReplaceOrder>, do_parse!(
     new_reference: be_u64 >>
     shares: be_u32 >>
     price: be_u32 >>
-    (ReplaceOrder { old_reference, new_reference, shares, price })
+    (ReplaceOrder { old_reference, new_reference, shares, price: price.into() })
 ));
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImbalanceIndicator {
+    paired_shares: u64,
+    imbalance_shares: u64,
+    imbalance_direction: ImbalanceDirection,
+    stock: ArrayString<[u8; 8]>,
+    far_price: Price,
+    near_price: Price,
+    current_ref_price: Price,
+    cross_type: CrossType,
+    price_variation_indicator: char   // TODO encode as enum somehow
+}
+
+named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
+    paired_shares: be_u64 >>
+        imbalance_shares: be_u64 >>
+        imbalance_direction: alt!(
+            char!('B') => {|_| ImbalanceDirection::Buy } |
+            char!('S') => {|_| ImbalanceDirection::Sell } |
+            char!('N') => {|_| ImbalanceDirection::NoImbalance } |
+            char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
+        ) >>
+        stock: stock >>
+        far_price: be_u32 >>
+        near_price: be_u32 >>
+        current_ref_price: be_u32 >>
+        cross_type: alt!(
+            char!('O') => {|_| CrossType::Opening} |
+            char!('C') => {|_| CrossType::Closing} |
+            char!('H') => {|_| CrossType::IpoOrHalted}
+        ) >>
+        price_variation_indicator: be_u8 >>
+        (ImbalanceIndicator{paired_shares,
+                            imbalance_shares,
+                            imbalance_direction,
+                            stock,
+                            far_price: far_price.into(),
+                            near_price: near_price.into(),
+                            current_ref_price: current_ref_price.into(),
+                            cross_type,
+                            price_variation_indicator: price_variation_indicator as char})
+));
 
 #[cfg(test)]
 mod tests {
@@ -462,10 +518,20 @@ mod tests {
 
     #[test]
     fn check_sizeof() {
-        assert_eq!(std::mem::size_of::<Message>(), 56)
+        assert_eq!(std::mem::size_of::<Message>(), 72)
     }
 
     #[test]
+    fn test_imbalance() {
+        let code = b"00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 4f 48 49 42 42 20 20 20 20
+                     00 00 00 00 00 00 00 00 00 00 00 00 43 20";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_imbalance_indicator(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    #[ignore]
     fn full_parse() {
         let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         for (ix, msg) in iter.enumerate() {
@@ -473,8 +539,8 @@ mod tests {
                 Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
                 Ok(msg) => {
                     match msg.body {
-                        MessageBody::Unknown { tag, content, .. } => {
-                            print!("Message {} tag '{}' unknown: [", ix, tag);
+                        MessageBody::Unknown { content, .. } => {
+                            print!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
                             for v in content {
                                 print!("{:02x} ", v)
                             }
@@ -482,8 +548,8 @@ mod tests {
                             panic!()
                         }
                         _ => {
-                            if ix % 100_000 == 0 {
-                                println!("Processed {} messages", ix)
+                            if ix % 1_000_000 == 0 {
+                                println!("Processed {}M messages", ix / 1_000_000)
                             }
                         }
                     }
