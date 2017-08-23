@@ -1,3 +1,5 @@
+use nom::IResult;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventCode {
     StartOfMessages,
@@ -53,13 +55,6 @@ pub enum IssueClassification {
     Unit,
     UnitsPerBenifInt,
     Warrant,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LuldRefPriceTier {
-    Tier1,
-    Tier2,
-    Na,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +116,80 @@ pub enum IssueSubType {
     Trust,
     Other,
     NotApplicable,
+}
+
+pub(crate) fn parse_issue_subtype(input: &[u8]) -> IResult<&[u8], IssueSubType> {
+    map_opt!(input, take!(2), |v: &[u8]| {
+        use IssueSubType::*;
+        Some(match v {
+            b"A " => PreferredTrustSecurities,
+            b"AI" => AlphaIndexETNs,
+            b"B " => IndexBasedDerivative,
+            b"C " => CommonShares,
+            b"CB" => CommodityBasedTrustShares,
+            b"CF" => CommodityFuturesTrustShares,
+            b"CL" => CommodityLinkedSecurities,
+            b"CM" => CommodityIndexTrustShares,
+            b"CO" => CollateralizedMortgageObligation,
+            b"CT" => CurrencyTrustShares,
+            b"CU" => CommodityCurrencyLinkedSecurities,
+            b"CW" => CurrencyWarrants,
+            b"D " => GlobalDepositaryShares,
+            b"E " => ETFPortfolioDepositaryReceipt,
+            b"EG" => EquityGoldShares,
+            b"EI" => ETNEquityIndexLinkedSecurities,
+            b"EM" => ExchangeTradedManagedFunds,
+            b"EN" => ExchangeTradedNotes,
+            b"EU" => EquityUnits,
+            b"F " => Holdrs,
+            b"FI" => ETNFixedIncomeLinkedSecurities,
+            b"FL" => ETNFuturesLinkedSecurities,
+            b"G " => GlobalShares,
+            b"I " => ETFIndexFundShares,
+            b"IR" => InterestRate,
+            b"IW" => IndexWarrant,
+            b"IX" => IndexLinkedExchangeableNotes,
+            b"J " => CorporateBackedTrustSecurity,
+            b"L " => ContingentLitigationRight,
+            b"LL" => Llc,
+            b"M " => EquityBasedDerivative,
+            b"MF" => ManagedFundShares,
+            b"ML" => ETNMultiFactorIndexLinkedSecurities,
+            b"MT" => ManagedTrustSecurities,
+            b"N " => NYRegistryShares,
+            b"O " => OpenEndedMutualFund,
+            b"P " => PrivatelyHeldSecurity,
+            b"PP" => PoisonPill,
+            b"PU" => PartnershipUnits,
+            b"Q " => ClosedEndFunds,
+            b"RC" => RegS,
+            b"RF" => CommodityRedeemableCommodityLinkedSecurities,
+            b"RT" => ETNRedeemableFuturesLinkedSecurities,
+            b"RU" => CommodityRedeemableCurrencyLinkedSecurities,
+            b"S " => Seed,
+            b"SC" => SpotRateClosing,
+            b"SI" => SpotRateIntraday,
+            b"T " => TrackingStock,
+            b"TC" => TrustCertificates,
+            b"TU" => TrustUnits,
+            b"U " => Portal,
+            b"V " => ContingentValueRight,
+            b"W " => TrustIssuedReceipts,
+            b"WC" => WorldCurrencyOption,
+            b"X " => Trust,
+            b"Y " => Other,
+            b"Z " => NotApplicable,
+            _ => return None,
+        })
+    })
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LuldRefPriceTier {
+    Tier1,
+    Tier2,
+    Na,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

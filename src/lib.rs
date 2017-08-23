@@ -16,6 +16,7 @@ use arrayvec::ArrayString;
 
 use errors::*;
 pub use enums::*;
+use enums::parse_issue_subtype;
 
 const BUFSIZE: usize = 8 * 1024;
 
@@ -386,8 +387,8 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
 
     // TODO these are dummy values, parse the char properly
     issue_classification: value!(IssueClassification::Unit, take!(1)) >>
-    issue_subtype: value!(IssueSubType::AlphaIndexETNs, take!(2)) >>
 
+    issue_subtype: parse_issue_subtype >>
     authenticity: alt!(
         char!('P') => {|_| true} |
         char!('T') => {|_| false}
