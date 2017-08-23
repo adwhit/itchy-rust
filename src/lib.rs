@@ -252,6 +252,10 @@ pub enum MessageBody {
         executed: u32,
         match_number: u64,
     },
+    OrderCancelled {
+        reference: u64,
+        cancelled: u32
+    },
     SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
@@ -283,6 +287,8 @@ named!(parse_message<Message>, do_parse!(
         b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
         b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
                           (MessageBody::OrderExecuted{ reference, executed, match_number })) |
+        b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
+                          (MessageBody::OrderCancelled { reference, cancelled })) |
         b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
