@@ -266,6 +266,7 @@ pub enum MessageBody {
         trading_state: TradingState,
         reason: ArrayString<[u8; 4]>,
     },
+    NonCrossTrade(NonCrossTrade),
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
     Unknown {
@@ -293,6 +294,7 @@ named!(parse_message<Message>, do_parse!(
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
         b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
+        b'P' => map!(parse_noncross_trade, |nt| MessageBody::NonCrossTrade(nt)) |
         b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
                           (MessageBody::MwcbDeclineLevel { level1: l1.into(),
                                                            level2: l2.into(),
@@ -555,6 +557,29 @@ named!(parse_cross_trade<CrossTrade>, do_parse!(
     (CrossTrade { shares, stock, cross_price: price.into(), match_number, cross_type})
 ));
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NonCrossTrade {
+    reference: u64,
+    side: Side,
+    shares: u32,
+    stock: ArrayString<[u8; 8]>,
+    price: Price4,
+    match_number: u64,
+}
+
+named!(parse_noncross_trade<NonCrossTrade>, do_parse!(
+    reference: be_u64 >>
+    side: alt!(
+        char!('B') => {|_| Side::Buy} |
+        char!('S') => {|_| Side::Sell}
+    ) >>
+    shares: be_u32 >>
+    stock: stock >>
+    price: be_u32 >>
+    match_number: be_u64 >>
+    (NonCrossTrade { reference, side, shares, stock, price: price.into(), match_number })
+));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,12 +648,22 @@ mod tests {
         let (rest, _) = parse_imbalance_indicator(&bytes[..]).unwrap();
         assert_eq!(rest.len(), 0);
     }
+
     #[test]
     fn test_cross_trade() {
         let code = b"00 00 00 00 00 00 00 00 45 53 53 41 20 20 20 20 00 00
                     00 00 00 00 00 00 00 00 03 c0 43";
         let bytes = hex_to_bytes(&code[..]);
         let (rest, _) = parse_cross_trade(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn test_noncross_trade() {
+        let code = b"00 00 00 00 00 00 00 00 42 00 00 0b b8 4e 55 47 54 20
+                     20 20 20 00 01 93 e8 00 00 00 00 00 00 41 7f";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_noncross_trade(&bytes[..]).unwrap();
         assert_eq!(rest.len(), 0);
     }
 
