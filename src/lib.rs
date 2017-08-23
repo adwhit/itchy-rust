@@ -287,36 +287,36 @@ named!(parse_message<Message>, do_parse!(
     length: be_u16 >>
     header: parse_message_header >>
     body: switch!(value!(header.tag),  // TODO is this 'value' call necessary?
-        b'S' => call!(parse_system_event) |
-        b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
-        b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
-        b'Y' => call!(parse_reg_sho_restriction) |
-        b'H' => call!(parse_trading_action) |
         b'A' => map!(apply!(parse_add_order, false), |order| MessageBody::AddOrder(order)) |
-        b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
-        b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
-                          (MessageBody::OrderExecuted{ reference, executed, match_number })) |
         b'C' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
                           printable: char2bool >> price: be_u32 >>
                           (MessageBody::OrderExecutedWithPrice{
                               reference, executed, match_number,
                               printable, price: price.into() })) |
-        b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
-                          (MessageBody::OrderCancelled { reference, cancelled })) |
-        b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
+        b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
+                          (MessageBody::OrderExecuted{ reference, executed, match_number })) |
+        b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
+        b'H' => call!(parse_trading_action) |
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
-        b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
-        b'P' => map!(parse_noncross_trade, |nt| MessageBody::NonCrossTrade(nt)) |
         b'K' => map!(parse_ipo_quoting_period, |ip| MessageBody::IpoQuotingPeriod(ip)) |
+        b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
+        b'P' => map!(parse_noncross_trade, |nt| MessageBody::NonCrossTrade(nt)) |
+        b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
+        b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
+        b'S' => call!(parse_system_event) |
+        b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
                           (MessageBody::MwcbDeclineLevel { level1: l1.into(),
                                                            level2: l2.into(),
                                                            level3: l3.into() })) |
+        b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
+                          (MessageBody::OrderCancelled { reference, cancelled })) |
+        b'Y' => call!(parse_reg_sho_restriction) |
         other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
                           length, content: Vec::from(slice)
-        })) >>
+                      })) >>
     (Message { header, body })
 ));
 
