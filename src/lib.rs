@@ -17,10 +17,9 @@ use arrayvec::ArrayString;
 use errors::*;
 pub use enums::*;
 
-const BUFSIZE: usize = 200;
+const BUFSIZE: usize = 8 * 1024;
 
 mod enums;
-
 
 #[allow(unused_doc_comment)]
 pub mod errors {
@@ -39,18 +38,19 @@ pub struct MessageStream<R> {
     bufend: usize,
     bytes_read: usize,
     read_calls: u32,
-    messages: u32,
+    message_ct: u32,
+    in_error_state: bool
 }
 
 impl<R> fmt::Debug for MessageStream<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "MessageStream {{ read_calls: {}, bytes_read: {}, buffer_pos: {}, messages: {} }}",
+            "MessageStream {{ read_calls: {}, bytes_read: {}, buffer_pos: {}, message_ct: {} }}",
             self.read_calls,
             self.bytes_read,
             self.bytes_read - (self.bufend - self.bufstart),
-            self.messages
+            self.message_ct
         )
     }
 }
@@ -65,17 +65,19 @@ impl<R: Read> MessageStream<R> {
             bufend: 0,
             bytes_read: 0,
             read_calls: 0,
-            messages: 0,
+            message_ct: 0,
+            in_error_state: false
         }
     }
 
     fn fetch_more_bytes(&mut self) -> Result<usize> {
         self.read_calls += 1;
         if self.bufend == BUFSIZE {
-            // we need more data from the reader
-            // first, copy the remnants back to the beginning of the buffer
+            // we need more data from the reader, but first,
+            // copy the remnants back to the beginning of the buffer
             // (this should only be a few bytes)
             assert!(self.bufstart as usize > BUFSIZE / 2); // safety check
+            // TODO this appears to assume that the buffer was 'full' to start with
             assert!(BUFSIZE - self.bufstart < 50); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
@@ -98,24 +100,56 @@ impl<R: Read> Iterator for MessageStream<R> {
             let buf = &self.buffer[self.bufstart..self.bufend];
             match parse_message(buf) {
                 Done(rest, msg) => {
+                    // TODO could this logic be sped up? Or is it already pretty fast?
+                    // it should just consist of pointer arithmetic
                     self.bufstart = self.bufend - rest.len();
-                    self.messages += 1;
+                    self.message_ct += 1;
+                    self.in_error_state = false;
                     return Some(Ok(msg));
                 }
-                Error(e) => return Some(Err(format!("Parse failed: {}", e).into())),
+                Error(e) => {
+                    // We need to inform user of error, but don't want to get
+                    // stuck in an infinite loop if error is ignored
+                    // (but obviously shouldn't fail silently on error either)
+                    // therefore track if we already in an 'error state' and bail if so
+                    if self.in_error_state {
+                        return None
+                    } else {
+                        self.in_error_state = true;
+                        return Some(Err(format!("Parse failed: {}", e).into()));
+                    }
+                }
                 Incomplete(_) => {
                     // fall through to below... necessary to appease borrow checker
                 }
             }
         }
         match self.fetch_more_bytes() {
-            Ok(0) => Some(Err("Unexpected EOF".into())),
+            Ok(0) => {
+                // Are we part-way through a parse? If not, assume we are done
+                if self.bufstart == self.bufend {
+                    return None
+                }
+                if self.in_error_state {
+                    return None
+                } else {
+                    self.in_error_state = true;
+                    Some(Err("Unexpected EOF".into()))
+                }
+            }
             Ok(ct) => {
                 self.bufend += ct;
                 self.bytes_read += ct;
                 self.next()
             }
-            Err(e) => Some(Err(e)),
+            Err(e) => {
+                if self.in_error_state {
+                    return None
+                } else {
+                    self.in_error_state = true;
+                    Some(Err(e))
+                }
+            }
         }
     }
 }
@@ -199,6 +233,7 @@ pub enum MessageBody {
     ReplaceOrder(ReplaceOrder),
     DeleteOrder { reference: u64 },
     Imbalance(ImbalanceIndicator),
+    CrossTrade(CrossTrade),
     SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
@@ -230,6 +265,7 @@ named!(parse_message<Message>, do_parse!(
         b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
+        b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
         other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
                           length, content: Vec::from(slice)
@@ -461,6 +497,29 @@ named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
                             price_variation_indicator: price_variation_indicator as char})
 ));
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossTrade {
+    shares: u64,
+    stock: ArrayString<[u8; 8]>,
+    cross_price: Price,
+    match_number: u64,
+    cross_type: CrossType
+}
+
+named!(parse_cross_trade<CrossTrade>, do_parse!(
+    shares: be_u64 >>
+    stock: stock >>
+    price: be_u32 >>
+    match_number: be_u64 >>
+    cross_type: alt!(
+        char!('O') => {|_| CrossType::Opening} |
+        char!('C') => {|_| CrossType::Closing} |
+        char!('H') => {|_| CrossType::IpoOrHalted} |
+        char!('I') => {|_| CrossType::Intraday}
+    ) >>
+    (CrossTrade { shares, stock, cross_price: price.into(), match_number, cross_type})
+));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,32 +588,63 @@ mod tests {
         let (rest, _) = parse_imbalance_indicator(&bytes[..]).unwrap();
         assert_eq!(rest.len(), 0);
     }
+    #[test]
+    fn test_cross_trade() {
+        let code = b"00 00 00 00 00 00 00 00 45 53 53 41 20 20 20 20 00 00
+                    00 00 00 00 00 00 00 00 03 c0 43";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_cross_trade(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_empty_buffer() {
+        let buf: &[u8] = &[];
+        let mut stream = parse_reader(buf);
+        assert!(stream.next().is_none()); // stops iterating immediately
+    }
+
+    #[test]
+    fn test_parse_invalid_buffer_fails() {
+        let buf: &[u8] = &[0, 0xc, 0x53, 0, 0, 0, 0x28, 0x6a];
+        let mut stream = parse_reader(buf);
+        assert!(stream.next().unwrap().is_err()); // first time gives error
+        assert!(stream.next().is_none()); // then it stops iterating
+    }
+
+    #[test]
+    fn test_parse_one_message() {
+        let code = b"000c 5300 0000 0028 6aab 3b3a 994f";
+        let buf = hex_to_bytes(&code[..]);
+        let mut stream = parse_reader(&buf[..]);
+        assert!(stream.next().unwrap().is_ok()); // first time ok
+        assert!(stream.next().is_none()); // then it stops iterating
+    }
 
     #[test]
     #[ignore]
     fn full_parse() {
-        let iter = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
-        for (ix, msg) in iter.enumerate() {
+        let stream = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
+        let mut ct = 0;
+        for (ix, msg) in stream.enumerate() {
+            ct = ix;
             match msg {
                 Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
                 Ok(msg) => {
                     match msg.body {
                         MessageBody::Unknown { content, .. } => {
-                            print!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
+                            eprint!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
                             for v in content {
-                                print!("{:02x} ", v)
+                                eprint!("{:02x} ", v)
                             }
-                            println!("]");
+                            eprintln!("]");
                             panic!()
                         }
-                        _ => {
-                            if ix % 1_000_000 == 0 {
-                                println!("Processed {}M messages", ix / 1_000_000)
-                            }
-                        }
+                        _ => {}
                     }
                 }
             }
         }
+        assert_eq!(ct, 13761739)
     }
 }

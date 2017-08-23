@@ -174,5 +174,6 @@ pub enum ImbalanceDirection {
 pub enum CrossType {
     Opening,
     Closing,
-    IpoOrHalted
+    IpoOrHalted,
+    Intraday
 }
