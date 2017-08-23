@@ -1,4 +1,4 @@
-# itchy-rust
+# itchy
 
 ITCH parser in Rust 
 

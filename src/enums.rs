@@ -177,3 +177,9 @@ pub enum CrossType {
     IpoOrHalted,
     Intraday,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpoReleaseQualifier {
+    Anticipated,
+    Cancelled
+}

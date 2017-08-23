@@ -78,7 +78,7 @@ impl<R: Read> MessageStream<R> {
             // (this should only be a few bytes)
             assert!(self.bufstart as usize > BUFSIZE / 2); // safety check
             // TODO this appears to assume that the buffer was 'full' to start with
-            assert!(BUFSIZE - self.bufstart < 50); // extra careful check
+            assert!(BUFSIZE - self.bufstart < 100); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
                 &left[..right.len()].copy_from_slice(&right[..]);
@@ -252,6 +252,13 @@ pub enum MessageBody {
         executed: u32,
         match_number: u64,
     },
+    OrderExecutedWithPrice {
+        reference: u64,
+        executed: u32,
+        match_number: u64,
+        printable: bool,
+        price: Price4
+    },
     OrderCancelled {
         reference: u64,
         cancelled: u32
@@ -269,6 +276,7 @@ pub enum MessageBody {
     NonCrossTrade(NonCrossTrade),
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
+    IpoQuotingPeriod(IpoQuotingPeriod),
     Unknown {
         length: u16,
         content: Vec<u8>, // TODO yuck, allocation
@@ -288,6 +296,11 @@ named!(parse_message<Message>, do_parse!(
         b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
         b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
                           (MessageBody::OrderExecuted{ reference, executed, match_number })) |
+        b'C' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
+                          printable: char2bool >> price: be_u32 >>
+                          (MessageBody::OrderExecutedWithPrice{
+                              reference, executed, match_number,
+                              printable, price: price.into() })) |
         b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
                           (MessageBody::OrderCancelled { reference, cancelled })) |
         b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
@@ -295,6 +308,7 @@ named!(parse_message<Message>, do_parse!(
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
         b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
         b'P' => map!(parse_noncross_trade, |nt| MessageBody::NonCrossTrade(nt)) |
+        b'K' => map!(parse_ipo_quoting_period, |ip| MessageBody::IpoQuotingPeriod(ip)) |
         b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
                           (MessageBody::MwcbDeclineLevel { level1: l1.into(),
                                                            level2: l2.into(),
@@ -580,6 +594,24 @@ named!(parse_noncross_trade<NonCrossTrade>, do_parse!(
     (NonCrossTrade { reference, side, shares, stock, price: price.into(), match_number })
 ));
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct IpoQuotingPeriod {
+    stock: ArrayString<[u8; 8]>,
+    release_time: u32,
+    release_qualifier: IpoReleaseQualifier,
+    price: Price4
+}
+
+named!(parse_ipo_quoting_period<IpoQuotingPeriod>, do_parse!(
+    stock: stock >>
+        release_time: be_u32 >>
+        release_qualifier: alt!(
+            char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
+            char!('C') => { |_| IpoReleaseQualifier::Cancelled }
+        ) >>
+        price: be_u32 >>
+        (IpoQuotingPeriod { stock, release_time, release_qualifier, price: price.into() })
+));
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,6 +696,14 @@ mod tests {
                      20 20 20 00 01 93 e8 00 00 00 00 00 00 41 7f";
         let bytes = hex_to_bytes(&code[..]);
         let (rest, _) = parse_noncross_trade(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn test_ipo_release() {
+        let code = b"5a 57 5a 5a 54 20 20 20 00 00 89 1c 41 00 01 86 a0";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_ipo_quoting_period(&bytes[..]).unwrap();
         assert_eq!(rest.len(), 0);
     }
 
