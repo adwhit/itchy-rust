@@ -744,7 +744,11 @@ mod tests {
                         eprintln!("]");
                         panic!()
                     }
-                    _ => {}
+                    _ => {
+                        if ix % 1_000_000 == 0 {
+                            println!("Processed {}M messages", ix / 1000000)
+                        }
+                    }
                 }
             }
         }
@@ -764,13 +768,13 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn full_parse_100_m() {
+    fn full_parse_283_m() {
         let stream = parse_gzip("data/01302017.NASDAQ_ITCH50.gz").unwrap();
         let mut ct = 0;
         for (ix, msg) in stream.enumerate() {
             ct = ix;
             handle_msg(ix, msg)
         }
-        assert_eq!(ct, 13761739)
+        assert_eq!(ct, 283238831)
     }
 }
