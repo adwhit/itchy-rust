@@ -9,5 +9,5 @@ is pretty fast, benching 1.5M messages/second on my laptop (Intel Core m3-6Y30)
 
 Todo:
 * Travis CI
-* Add final message types: 'W' (MWCB Breach) and 'B' (Broken Trade)
+* Add final message type: 'B' (Broken Trade)
 * Finish `parse_stock_directory` enums

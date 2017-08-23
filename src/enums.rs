@@ -183,3 +183,10 @@ pub enum IpoReleaseQualifier {
     Anticipated,
     Cancelled
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelBreached {
+    L1,
+    L2,
+    L3,
+}

@@ -281,6 +281,7 @@ pub enum MessageBody {
         length: u16,
         content: Vec<u8>, // TODO yuck, allocation
     },
+    Breach(LevelBreached)
 }
 
 named!(parse_message<Message>, do_parse!(
@@ -310,6 +311,11 @@ named!(parse_message<Message>, do_parse!(
                           (MessageBody::MwcbDeclineLevel { level1: l1.into(),
                                                            level2: l2.into(),
                                                            level3: l3.into() })) |
+        b'W' => map!(alt!(
+            char!('1') => {|_| LevelBreached::L1 } |
+            char!('2') => {|_| LevelBreached::L2 } |
+            char!('3') => {|_| LevelBreached::L3 }
+        ), |l| MessageBody::Breach(l)) |
         b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
                           (MessageBody::OrderCancelled { reference, cancelled })) |
         b'Y' => call!(parse_reg_sho_restriction) |
