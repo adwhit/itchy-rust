@@ -167,7 +167,7 @@ pub enum ImbalanceDirection {
     Buy,
     Sell,
     NoImbalance,
-    InsufficientOrders
+    InsufficientOrders,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,5 +175,5 @@ pub enum CrossType {
     Opening,
     Closing,
     IpoOrHalted,
-    Intraday
+    Intraday,
 }

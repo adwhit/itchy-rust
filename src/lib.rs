@@ -39,7 +39,7 @@ pub struct MessageStream<R> {
     bytes_read: usize,
     read_calls: u32,
     message_ct: u32,
-    in_error_state: bool
+    in_error_state: bool,
 }
 
 impl<R> fmt::Debug for MessageStream<R> {
@@ -66,7 +66,7 @@ impl<R: Read> MessageStream<R> {
             bytes_read: 0,
             read_calls: 0,
             message_ct: 0,
-            in_error_state: false
+            in_error_state: false,
         }
     }
 
@@ -113,7 +113,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                     // (but obviously shouldn't fail silently on error either)
                     // therefore track if we already in an 'error state' and bail if so
                     if self.in_error_state {
-                        return None
+                        return None;
                     } else {
                         self.in_error_state = true;
                         return Some(Err(format!("Parse failed: {}", e).into()));
@@ -128,10 +128,10 @@ impl<R: Read> Iterator for MessageStream<R> {
             Ok(0) => {
                 // Are we part-way through a parse? If not, assume we are done
                 if self.bufstart == self.bufend {
-                    return None
+                    return None;
                 }
                 if self.in_error_state {
-                    return None
+                    return None;
                 } else {
                     self.in_error_state = true;
                     Some(Err("Unexpected EOF".into()))
@@ -144,7 +144,7 @@ impl<R: Read> Iterator for MessageStream<R> {
             }
             Err(e) => {
                 if self.in_error_state {
-                    return None
+                    return None;
                 } else {
                     self.in_error_state = true;
                     Some(Err(e))
@@ -464,7 +464,7 @@ pub struct ImbalanceIndicator {
     near_price: Price,
     current_ref_price: Price,
     cross_type: CrossType,
-    price_variation_indicator: char   // TODO encode as enum somehow
+    price_variation_indicator: char, // TODO encode as enum somehow
 }
 
 named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
@@ -503,7 +503,7 @@ pub struct CrossTrade {
     stock: ArrayString<[u8; 8]>,
     cross_price: Price,
     match_number: u64,
-    cross_type: CrossType
+    cross_type: CrossType,
 }
 
 named!(parse_cross_trade<CrossTrade>, do_parse!(
@@ -621,29 +621,45 @@ mod tests {
         assert!(stream.next().is_none()); // then it stops iterating
     }
 
+    fn handle_msg(ix: usize, msg: Result<Message>) {
+        match msg {
+            Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
+            Ok(msg) => {
+                match msg.body {
+                    MessageBody::Unknown { content, .. } => {
+                        eprint!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
+                        for v in content {
+                            eprint!("{:02x} ", v)
+                        }
+                        eprintln!("]");
+                        panic!()
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     #[test]
     #[ignore]
-    fn full_parse() {
+    fn full_parse_13_m() {
         let stream = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
         let mut ct = 0;
         for (ix, msg) in stream.enumerate() {
             ct = ix;
-            match msg {
-                Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-                Ok(msg) => {
-                    match msg.body {
-                        MessageBody::Unknown { content, .. } => {
-                            eprint!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
-                            for v in content {
-                                eprint!("{:02x} ", v)
-                            }
-                            eprintln!("]");
-                            panic!()
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            handle_msg(ix, msg)
+        }
+        assert_eq!(ct, 13761739)
+    }
+
+    #[test]
+    #[ignore]
+    fn full_parse_100_m() {
+        let stream = parse_gzip("data/01302017.NASDAQ_ITCH50.gz").unwrap();
+        let mut ct = 0;
+        for (ix, msg) in stream.enumerate() {
+            ct = ix;
+            handle_msg(ix, msg)
         }
         assert_eq!(ct, 13761739)
     }
