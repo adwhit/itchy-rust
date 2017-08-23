@@ -183,14 +183,22 @@ pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Price(u32);
+pub struct Price4(u32);
 
-impl From<u32> for Price {
-    fn from(v: u32) -> Price {
-        Price(v)
+impl From<u32> for Price4 {
+    fn from(v: u32) -> Price4 {
+        Price4(v)
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Price8(u64);
+
+impl From<u64> for Price8 {
+    fn from(v: u64) -> Price8 {
+        Price8(v)
+    }
+}
 named!(char2bool<bool>, alt!(
     char!('Y') => {|_| true} |
     char!('N') => {|_| false}
@@ -234,6 +242,7 @@ pub enum MessageBody {
     DeleteOrder { reference: u64 },
     Imbalance(ImbalanceIndicator),
     CrossTrade(CrossTrade),
+    MwcbDeclineLevel { level1: Price8, level2: Price8, level3: Price8 },
     SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
@@ -261,11 +270,16 @@ named!(parse_message<Message>, do_parse!(
         b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
         b'Y' => call!(parse_reg_sho_restriction) |
         b'H' => call!(parse_trading_action) |
-        b'A' => map!(parse_add_order, |order| MessageBody::AddOrder(order)) |
+        b'A' => map!(apply!(parse_add_order, false), |order| MessageBody::AddOrder(order)) |
+        b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
         b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
         b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
         b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
         b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
+        b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
+                          (MessageBody::MwcbDeclineLevel { level1: l1.into(),
+                                                           level2: l2.into(),
+                                                           level3: l3.into() })) |
         other => map!(take!(length - 11),    // tag + header = 11
                       |slice| MessageBody::Unknown {
                           length, content: Vec::from(slice)
@@ -423,10 +437,12 @@ pub struct AddOrder {
     side: Side,
     shares: u32,
     stock: ArrayString<[u8; 8]>,
-    price: Price,
+    price: Price4,
+    mpid: Option<ArrayString<[u8; 4]>>
 }
 
-named!(parse_add_order<AddOrder>, do_parse!(
+fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> {
+    do_parse!(input,
     reference: be_u64 >>
     side: alt!(
         char!('B') => {|_| Side::Buy} |
@@ -435,15 +451,16 @@ named!(parse_add_order<AddOrder>, do_parse!(
     shares: be_u32 >>
     stock: stock >>
     price: be_u32 >>
-    (AddOrder { reference, side, shares, stock, price: price.into() })
-));
+    mpid: cond!(attribution, map!(take_str!(4), |s| ArrayString::from(s).unwrap())) >>
+    (AddOrder { reference, side, shares, stock, price: price.into(), mpid })
+)}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReplaceOrder {
     old_reference: u64,
     new_reference: u64,
     shares: u32,
-    price: Price,
+    price: Price4,
 }
 
 named!(parse_replace_order<ReplaceOrder>, do_parse!(
@@ -460,9 +477,9 @@ pub struct ImbalanceIndicator {
     imbalance_shares: u64,
     imbalance_direction: ImbalanceDirection,
     stock: ArrayString<[u8; 8]>,
-    far_price: Price,
-    near_price: Price,
-    current_ref_price: Price,
+    far_price: Price4,
+    near_price: Price4,
+    current_ref_price: Price4,
     cross_type: CrossType,
     price_variation_indicator: char, // TODO encode as enum somehow
 }
@@ -501,7 +518,7 @@ named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
 pub struct CrossTrade {
     shares: u64,
     stock: ArrayString<[u8; 8]>,
-    cross_price: Price,
+    cross_price: Price4,
     match_number: u64,
     cross_type: CrossType,
 }
@@ -571,7 +588,7 @@ mod tests {
     fn add_order() {
         let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10";
         let bytes = hex_to_bytes(&code[..]);
-        let (rest, _) = parse_add_order(&bytes[..]).unwrap();
+        let (rest, _) = parse_add_order(&bytes[..], false).unwrap();
         assert_eq!(rest.len(), 0);
     }
 
