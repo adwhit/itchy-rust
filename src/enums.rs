@@ -181,7 +181,7 @@ pub enum CrossType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpoReleaseQualifier {
     Anticipated,
-    Cancelled
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

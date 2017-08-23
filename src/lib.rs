@@ -257,12 +257,9 @@ pub enum MessageBody {
         executed: u32,
         match_number: u64,
         printable: bool,
-        price: Price4
+        price: Price4,
     },
-    OrderCancelled {
-        reference: u64,
-        cancelled: u32
-    },
+    OrderCancelled { reference: u64, cancelled: u32 },
     SystemEvent { event: EventCode },
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
@@ -281,7 +278,8 @@ pub enum MessageBody {
         length: u16,
         content: Vec<u8>, // TODO yuck, allocation
     },
-    Breach(LevelBreached)
+    Breach(LevelBreached),
+    BrokenTrade { match_number: u64 },
 }
 
 named!(parse_message<Message>, do_parse!(
@@ -289,6 +287,7 @@ named!(parse_message<Message>, do_parse!(
     header: parse_message_header >>
     body: switch!(value!(header.tag),  // TODO is this 'value' call necessary?
         b'A' => map!(apply!(parse_add_order, false), |order| MessageBody::AddOrder(order)) |
+        b'B' => map!(be_u64, |match_number| MessageBody::BrokenTrade{ match_number }) |
         b'C' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
                           printable: char2bool >> price: be_u32 >>
                           (MessageBody::OrderExecutedWithPrice{
@@ -605,7 +604,7 @@ pub struct IpoQuotingPeriod {
     stock: ArrayString<[u8; 8]>,
     release_time: u32,
     release_qualifier: IpoReleaseQualifier,
-    price: Price4
+    price: Price4,
 }
 
 named!(parse_ipo_quoting_period<IpoQuotingPeriod>, do_parse!(
