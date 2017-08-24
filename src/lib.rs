@@ -49,7 +49,6 @@ const BUFSIZE: usize = 8 * 1024;
 
 mod enums;
 
-#[allow(unused_doc_comment)]
 pub mod errors {
     error_chain!{
         foreign_links {
