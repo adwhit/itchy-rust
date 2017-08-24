@@ -30,4 +30,4 @@ for msg in stream {
 }
 ```
 
-See the [API docs](http://fake) for more information.
+See the [API docs](https://docs.rs/itchy/0.1.0/) for more information.
