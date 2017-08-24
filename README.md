@@ -10,7 +10,7 @@ is pretty fast, benching 1.5M messages/second on my laptop (Intel Core m3-6Y30)
 Typical usage:
 
 ```rust
-extern crate itch;
+extern crate itchy;
 
 let stream = itch::MessageStream::from_file("/path/to/file.itch").unwrap();
 for msg in stream {
