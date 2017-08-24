@@ -32,6 +32,7 @@ pub mod errors {
     }
 }
 
+/// Represents an iterable stream of ITCH protocol messages
 pub struct MessageStream<R> {
     reader: R,
     buffer: Box<[u8; BUFSIZE]>,
@@ -41,6 +42,21 @@ pub struct MessageStream<R> {
     read_calls: u32,
     message_ct: u32,
     in_error_state: bool,
+}
+
+impl MessageStream<File> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<MessageStream<File>> {
+        let reader = File::open(path)?;
+        Ok(MessageStream::from_reader(reader))
+    }
+}
+
+impl MessageStream<GzDecoder<File>> {
+    pub fn from_gzip<P: AsRef<Path>>(path: P) -> Result<MessageStream<GzDecoder<File>>> {
+        let file = File::open(path)?;
+        let reader = GzDecoder::new(file)?;
+        Ok(MessageStream::from_reader(reader))
+    }
 }
 
 impl<R> fmt::Debug for MessageStream<R> {
@@ -56,8 +72,11 @@ impl<R> fmt::Debug for MessageStream<R> {
     }
 }
 
-
 impl<R: Read> MessageStream<R> {
+    pub fn from_reader(reader: R) -> MessageStream<R> {
+        MessageStream::new(reader)
+    }
+
     fn new(reader: R) -> MessageStream<R> {
         MessageStream {
             reader,
@@ -155,34 +174,6 @@ impl<R: Read> Iterator for MessageStream<R> {
     }
 }
 
-pub fn parse_reader<R: Read>(reader: R) -> MessageStream<R> {
-    // We will do the parsing in a streaming fashion because these
-    // files are BIG and we don't want to load it all into memory
-    MessageStream::new(reader)
-}
-
-pub fn parse_gzip<P: AsRef<Path>>(path: P) -> Result<MessageStream<GzDecoder<File>>> {
-    let file = File::open(path)?;
-    let reader = GzDecoder::new(file)?;
-    Ok(parse_reader(reader))
-}
-
-pub fn parse_file<P: AsRef<Path>>(path: P) -> Result<MessageStream<File>> {
-    let reader = File::open(path)?;
-    Ok(parse_reader(reader))
-}
-
-#[inline]
-pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
-    if i.len() < 6 {
-        IResult::Incomplete(Needed::Size(6))
-    } else {
-        let res = ((i[0] as u64) << 40) + ((i[1] as u64) << 32) + ((i[2] as u64) << 24) +
-            ((i[3] as u64) << 16) + ((i[4] as u64) << 8) + i[5] as u64;
-        IResult::Done(&i[6..], res)
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Price4(u32);
 
@@ -213,41 +204,44 @@ named!(maybe_char2bool<Option<bool>>, alt!(
 
 named!(stock<ArrayString<[u8; 8]>>, map!(take_str!(8), |s| ArrayString::from(s).unwrap()));
 
+#[inline]
+fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
+    if i.len() < 6 {
+        IResult::Incomplete(Needed::Size(6))
+    } else {
+        let res = ((i[0] as u64) << 40) + ((i[1] as u64) << 32) + ((i[2] as u64) << 24) +
+            ((i[3] as u64) << 16) + ((i[4] as u64) << 8) + i[5] as u64;
+        IResult::Done(&i[6..], res)
+    }
+}
+
+/// An ITCH protocol message. Refer to the protocol spec for interpretation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
-    header: MsgHeader,
-    body: MessageBody,
+    pub tag: u8,
+    pub stock_locate: u16,
+    pub tracking_number: u16,
+    pub timestamp: u64,
+    pub body: Body,
 }
 
+/// The message body. Refer to the protocol spec for interpretation.
 #[derive(Debug, Clone, PartialEq)]
-struct MsgHeader {
-    tag: u8,
-    stock_locate: u16,
-    tracking_number: u16,
-    timestamp: u64,
-}
-
-named!(parse_message_header<MsgHeader>, do_parse!(
-    tag: be_u8 >>
-    stock_locate: be_u16 >>
-    tracking_number: be_u16 >>
-    timestamp: be_u48 >>
-    (MsgHeader { tag, stock_locate, tracking_number, timestamp })
-));
-
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MessageBody {
+pub enum Body {
     AddOrder(AddOrder),
-    ReplaceOrder(ReplaceOrder),
+    Breach(LevelBreached),
+    BrokenTrade { match_number: u64 },
+    CrossTrade(CrossTrade),
     DeleteOrder { reference: u64 },
     Imbalance(ImbalanceIndicator),
-    CrossTrade(CrossTrade),
+    IpoQuotingPeriod(IpoQuotingPeriod),
     MwcbDeclineLevel {
         level1: Price8,
         level2: Price8,
         level3: Price8,
     },
+    NonCrossTrade(NonCrossTrade),
+    OrderCancelled { reference: u64, cancelled: u32 },
     OrderExecuted {
         reference: u64,
         executed: u32,
@@ -260,67 +254,66 @@ pub enum MessageBody {
         printable: bool,
         price: Price4,
     },
-    OrderCancelled { reference: u64, cancelled: u32 },
-    SystemEvent { event: EventCode },
+    ParticipantPosition(MarketParticipantPosition),
     RegShoRestriction {
         stock: ArrayString<[u8; 8]>,
         action: RegShoAction,
     },
+    ReplaceOrder(ReplaceOrder),
+    StockDirectory(StockDirectory),
+    SystemEvent { event: EventCode },
     TradingAction {
         stock: ArrayString<[u8; 8]>,
         trading_state: TradingState,
         reason: ArrayString<[u8; 4]>,
     },
-    NonCrossTrade(NonCrossTrade),
-    StockDirectory(StockDirectory),
-    ParticipantPosition(MarketParticipantPosition),
-    IpoQuotingPeriod(IpoQuotingPeriod),
     Unknown { length: u16, content: Vec<u8> },
-    Breach(LevelBreached),
-    BrokenTrade { match_number: u64 },
 }
 
 named!(parse_message<Message>, do_parse!(
     length: be_u16 >>
-    header: parse_message_header >>
-    body: switch!(value!(header.tag),  // TODO is this 'value' call necessary?
-        b'A' => map!(apply!(parse_add_order, false), |order| MessageBody::AddOrder(order)) |
-        b'B' => map!(be_u64, |match_number| MessageBody::BrokenTrade{ match_number }) |
+    tag: be_u8 >>
+    stock_locate: be_u16 >>
+    tracking_number: be_u16 >>
+    timestamp: be_u48 >>
+    body: switch!(value!(tag),
+        b'A' => map!(apply!(parse_add_order, false), |order| Body::AddOrder(order)) |
+        b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
         b'C' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
                           printable: char2bool >> price: be_u32 >>
-                          (MessageBody::OrderExecutedWithPrice{
+                          (Body::OrderExecutedWithPrice{
                               reference, executed, match_number,
                               printable, price: price.into() })) |
-        b'D' => map!(be_u64, |reference| MessageBody::DeleteOrder{ reference }) |
+        b'D' => map!(be_u64, |reference| Body::DeleteOrder{ reference }) |
         b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
-                          (MessageBody::OrderExecuted{ reference, executed, match_number })) |
-        b'F' => map!(apply!(parse_add_order, true), |order| MessageBody::AddOrder(order)) |
+                          (Body::OrderExecuted{ reference, executed, match_number })) |
+        b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
         b'H' => call!(parse_trading_action) |
-        b'I' => map!(parse_imbalance_indicator, |pii| MessageBody::Imbalance(pii)) |
-        b'K' => map!(parse_ipo_quoting_period, |ip| MessageBody::IpoQuotingPeriod(ip)) |
-        b'L' => map!(parse_participant_position, |pp| MessageBody::ParticipantPosition(pp)) |
-        b'P' => map!(parse_noncross_trade, |nt| MessageBody::NonCrossTrade(nt)) |
-        b'Q' => map!(parse_cross_trade, |ct| MessageBody::CrossTrade(ct)) |
-        b'R' => map!(parse_stock_directory, |sd| MessageBody::StockDirectory(sd)) |
+        b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
+        b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
+        b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
+        b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
+        b'Q' => map!(parse_cross_trade, |ct| Body::CrossTrade(ct)) |
+        b'R' => map!(parse_stock_directory, |sd| Body::StockDirectory(sd)) |
         b'S' => call!(parse_system_event) |
-        b'U' => map!(parse_replace_order, |order| MessageBody::ReplaceOrder(order)) |
+        b'U' => map!(parse_replace_order, |order| Body::ReplaceOrder(order)) |
         b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
-                          (MessageBody::MwcbDeclineLevel { level1: l1.into(),
+                          (Body::MwcbDeclineLevel { level1: l1.into(),
                                                            level2: l2.into(),
                                                            level3: l3.into() })) |
         b'W' => map!(alt!(
             char!('1') => {|_| LevelBreached::L1 } |
             char!('2') => {|_| LevelBreached::L2 } |
             char!('3') => {|_| LevelBreached::L3 }
-        ), |l| MessageBody::Breach(l)) |
+        ), |l| Body::Breach(l)) |
         b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
-                          (MessageBody::OrderCancelled { reference, cancelled })) |
+                          (Body::OrderCancelled { reference, cancelled })) |
         b'Y' => call!(parse_reg_sho_restriction) |
         other => map!(take!(length - 11),    // tag + header = 11
-                      |slice| MessageBody::Unknown {
+                      |slice| Body::Unknown {
                           length, content: Vec::from(slice)
                       })) >>
-    (Message { header, body })
+    (Message { tag, stock_locate, tracking_number, timestamp, body })
 ));
 
 
@@ -342,7 +335,7 @@ pub struct StockDirectory {
     inverse_indicator: bool,
 }
 
-named!(parse_system_event<MessageBody>, do_parse!(
+named!(parse_system_event<Body>, do_parse!(
     event_code: alt!(
         char!('O') => { |_| EventCode::StartOfMessages } |
         char!('S') => { |_| EventCode::StartOfSystemHours } |
@@ -351,7 +344,7 @@ named!(parse_system_event<MessageBody>, do_parse!(
         char!('E') => { |_| EventCode::EndOfSystemHours } |
         char!('C') => { |_| EventCode::EndOfMessages }
     ) >>
-    (MessageBody::SystemEvent{event: event_code})
+    (Body::SystemEvent{event: event_code})
 ));
 
 named!(parse_stock_directory<StockDirectory>, do_parse!(
@@ -441,17 +434,17 @@ named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
     })
 ));
 
-named!(parse_reg_sho_restriction<MessageBody>, do_parse!(
+named!(parse_reg_sho_restriction<Body>, do_parse!(
     stock: stock >>
     action: alt!(
         char!('0') => {|_| RegShoAction::None} |
         char!('1') => {|_| RegShoAction::Intraday} |
         char!('2') => {|_| RegShoAction::Extant}
     ) >>
-    (MessageBody::RegShoRestriction { stock, action })
+    (Body::RegShoRestriction { stock, action })
 ));
 
-named!(parse_trading_action<MessageBody>, do_parse!(
+named!(parse_trading_action<Body>, do_parse!(
     stock: stock >>
     trading_state: alt!(
         char!('H') => {|_| TradingState::Halted} |
@@ -460,7 +453,7 @@ named!(parse_trading_action<MessageBody>, do_parse!(
         char!('T') => {|_| TradingState::Trading}
     ) >> be_u8 >> // skip reserved byte
     reason: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
-    (MessageBody::TradingAction { stock, trading_state, reason })
+    (Body::TradingAction { stock, trading_state, reason })
 ));
 
 
@@ -710,14 +703,14 @@ mod tests {
     #[test]
     fn test_parse_empty_buffer() {
         let buf: &[u8] = &[];
-        let mut stream = parse_reader(buf);
+        let mut stream = MessageStream::from_reader(buf);
         assert!(stream.next().is_none()); // stops iterating immediately
     }
 
     #[test]
     fn test_parse_invalid_buffer_fails() {
         let buf: &[u8] = &[0, 0xc, 0x53, 0, 0, 0, 0x28, 0x6a];
-        let mut stream = parse_reader(buf);
+        let mut stream = MessageStream::from_reader(buf);
         assert!(stream.next().unwrap().is_err()); // first time gives error
         assert!(stream.next().is_none()); // then it stops iterating
     }
@@ -726,7 +719,7 @@ mod tests {
     fn test_parse_one_message() {
         let code = b"000c 5300 0000 0028 6aab 3b3a 994f";
         let buf = hex_to_bytes(&code[..]);
-        let mut stream = parse_reader(&buf[..]);
+        let mut stream = MessageStream::from_reader(&buf[..]);
         assert!(stream.next().unwrap().is_ok()); // first time ok
         assert!(stream.next().is_none()); // then it stops iterating
     }
@@ -736,8 +729,8 @@ mod tests {
             Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
             Ok(msg) => {
                 match msg.body {
-                    MessageBody::Unknown { content, .. } => {
-                        eprint!("Message {} tag '{}' unknown: [", ix, msg.header.tag as char);
+                    Body::Unknown { content, .. } => {
+                        eprint!("Message {} tag '{}' unknown: [", ix, msg.tag as char);
                         for v in content {
                             eprint!("{:02x} ", v)
                         }
@@ -757,7 +750,7 @@ mod tests {
     #[test]
     #[ignore]
     fn full_parse_13_m() {
-        let stream = parse_file("data/01302016.NASDAQ_ITCH50").unwrap();
+        let stream = MessageStream::from_file("data/01302016.NASDAQ_ITCH50").unwrap();
         let mut ct = 0;
         for (ix, msg) in stream.enumerate() {
             ct = ix;
@@ -769,7 +762,7 @@ mod tests {
     #[test]
     #[ignore]
     fn full_parse_283_m() {
-        let stream = parse_gzip("data/01302017.NASDAQ_ITCH50.gz").unwrap();
+        let stream = MessageStream::from_gzip("data/01302017.NASDAQ_ITCH50.gz").unwrap();
         let mut ct = 0;
         for (ix, msg) in stream.enumerate() {
             ct = ix;

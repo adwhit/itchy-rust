@@ -77,7 +77,7 @@ pub(crate) fn parse_issue_classification(input: &[u8]) -> IResult<&[u8], IssueCl
             b'U' => Unit,
             b'V' => UnitsPerBenifInt,
             b'W' => Warrant,
-            _ => return None
+            _ => return None,
         })
     })
 }
