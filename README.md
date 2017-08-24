@@ -9,4 +9,4 @@ is pretty fast, benching 1.5M messages/second on my laptop (Intel Core m3-6Y30)
 
 Todo:
 * Travis CI
-* Finish `parse_stock_directory` enums
+* Interpret Price4/Price8

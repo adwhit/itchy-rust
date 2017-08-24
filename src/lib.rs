@@ -275,10 +275,7 @@ pub enum MessageBody {
     StockDirectory(StockDirectory),
     ParticipantPosition(MarketParticipantPosition),
     IpoQuotingPeriod(IpoQuotingPeriod),
-    Unknown {
-        length: u16,
-        content: Vec<u8>, // TODO yuck, allocation
-    },
+    Unknown { length: u16, content: Vec<u8> },
     Breach(LevelBreached),
     BrokenTrade { match_number: u64 },
 }
@@ -384,10 +381,7 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
     ) >>
     round_lot_size: be_u32 >>
     round_lots_only: char2bool >>
-
-    // TODO these are dummy values, parse the char properly
-    issue_classification: value!(IssueClassification::Unit, take!(1)) >>
-
+    issue_classification: parse_issue_classification >>
     issue_subtype: parse_issue_subtype >>
     authenticity: alt!(
         char!('P') => {|_| true} |

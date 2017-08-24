@@ -1,4 +1,4 @@
-use nom::IResult;
+use nom::{IResult, be_u8};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventCode {
@@ -55,6 +55,31 @@ pub enum IssueClassification {
     Unit,
     UnitsPerBenifInt,
     Warrant,
+}
+
+pub(crate) fn parse_issue_classification(input: &[u8]) -> IResult<&[u8], IssueClassification> {
+    map_opt!(input, be_u8, |v| {
+        use IssueClassification::*;
+        Some(match v {
+            b'A' => AmericanDepositaryShare,
+            b'B' => Bond,
+            b'C' => CommonStock,
+            b'F' => DepositoryReceipt,
+            b'I' => A144,
+            b'L' => LimitedPartnership,
+            b'N' => Notes,
+            b'O' => OrdinaryShare,
+            b'P' => PreferredStock,
+            b'Q' => OtherSecurities,
+            b'R' => Right,
+            b'S' => SharesOfBeneficialInterest,
+            b'T' => ConvertibleDebenture,
+            b'U' => Unit,
+            b'V' => UnitsPerBenifInt,
+            b'W' => Warrant,
+            _ => return None
+        })
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
