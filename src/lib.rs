@@ -29,7 +29,13 @@ use std::fmt;
 
 use flate2::read::GzDecoder;
 use nom::{be_u8, be_u16, be_u32, be_u64, IResult, Needed};
-use arrayvec::ArrayString;
+pub use arrayvec::ArrayString;
+
+/// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
+pub type ArrayString4 = ArrayString<[u8; 4]>;
+
+/// Stack-allocated string of size 8 bytes (re-exported from `arrayvec`)
+pub type ArrayString8 = ArrayString<[u8; 8]>;
 
 use errors::*;
 pub use enums::*;
@@ -192,7 +198,7 @@ impl<R: Read> Iterator for MessageStream<R> {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Price4(u32);
+pub struct Price4(pub u32);
 
 impl From<u32> for Price4 {
     fn from(v: u32) -> Price4 {
@@ -201,7 +207,7 @@ impl From<u32> for Price4 {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Price8(u64);
+pub struct Price8(pub u64);
 
 impl From<u64> for Price8 {
     fn from(v: u64) -> Price8 {
@@ -219,7 +225,7 @@ named!(maybe_char2bool<Option<bool>>, alt!(
     char!(' ') => {|_| None}
 ));
 
-named!(stock<ArrayString<[u8; 8]>>, map!(take_str!(8), |s| ArrayString::from(s).unwrap()));
+named!(stock<ArrayString8>, map!(take_str!(8), |s| ArrayString::from(s).unwrap()));
 
 #[inline]
 fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
@@ -273,16 +279,16 @@ pub enum Body {
     },
     ParticipantPosition(MarketParticipantPosition),
     RegShoRestriction {
-        stock: ArrayString<[u8; 8]>,
+        stock: ArrayString8,
         action: RegShoAction,
     },
     ReplaceOrder(ReplaceOrder),
     StockDirectory(StockDirectory),
     SystemEvent { event: EventCode },
     TradingAction {
-        stock: ArrayString<[u8; 8]>,
+        stock: ArrayString8,
         trading_state: TradingState,
-        reason: ArrayString<[u8; 4]>,
+        reason: ArrayString4,
     },
     Unknown { length: u16, content: Vec<u8> },
 }
@@ -336,20 +342,20 @@ named!(parse_message<Message>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StockDirectory {
-    stock: ArrayString<[u8; 8]>,
-    market_category: MarketCategory,
-    financial_status: FinancialStatus,
-    round_lot_size: u32,
-    round_lots_only: bool,
-    issue_classification: IssueClassification,
-    issue_subtype: IssueSubType,
-    authenticity: bool,
-    short_sale_threshold: Option<bool>,
-    ipo_flag: Option<bool>,
-    luld_ref_price_tier: LuldRefPriceTier,
-    etp_flag: Option<bool>,
-    etp_leverage_factor: u32,
-    inverse_indicator: bool,
+    pub stock: ArrayString8,
+    pub market_category: MarketCategory,
+    pub financial_status: FinancialStatus,
+    pub round_lot_size: u32,
+    pub round_lots_only: bool,
+    pub issue_classification: IssueClassification,
+    pub issue_subtype: IssueSubType,
+    pub authenticity: bool,
+    pub short_sale_threshold: Option<bool>,
+    pub ipo_flag: Option<bool>,
+    pub luld_ref_price_tier: LuldRefPriceTier,
+    pub etp_flag: Option<bool>,
+    pub etp_leverage_factor: u32,
+    pub inverse_indicator: bool,
 }
 
 named!(parse_system_event<Body>, do_parse!(
@@ -417,11 +423,11 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketParticipantPosition {
-    mpid: ArrayString<[u8; 4]>,
-    stock: ArrayString<[u8; 8]>,
-    primary_market_maker: bool,
-    market_maker_mode: MarketMakerMode,
-    market_participant_state: MarketParticipantState,
+    pub mpid: ArrayString4,
+    pub stock: ArrayString8,
+    pub primary_market_maker: bool,
+    pub market_maker_mode: MarketMakerMode,
+    pub market_participant_state: MarketParticipantState,
 }
 
 named!(parse_participant_position<MarketParticipantPosition>, do_parse!(
@@ -476,12 +482,12 @@ named!(parse_trading_action<Body>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AddOrder {
-    reference: u64,
-    side: Side,
-    shares: u32,
-    stock: ArrayString<[u8; 8]>,
-    price: Price4,
-    mpid: Option<ArrayString<[u8; 4]>>,
+    pub reference: u64,
+    pub side: Side,
+    pub shares: u32,
+    pub stock: ArrayString8,
+    pub price: Price4,
+    pub mpid: Option<ArrayString4>,
 }
 
 fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> {
@@ -501,10 +507,10 @@ fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> 
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReplaceOrder {
-    old_reference: u64,
-    new_reference: u64,
-    shares: u32,
-    price: Price4,
+    pub old_reference: u64,
+    pub new_reference: u64,
+    pub shares: u32,
+    pub price: Price4,
 }
 
 named!(parse_replace_order<ReplaceOrder>, do_parse!(
@@ -517,15 +523,15 @@ named!(parse_replace_order<ReplaceOrder>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImbalanceIndicator {
-    paired_shares: u64,
-    imbalance_shares: u64,
-    imbalance_direction: ImbalanceDirection,
-    stock: ArrayString<[u8; 8]>,
-    far_price: Price4,
-    near_price: Price4,
-    current_ref_price: Price4,
-    cross_type: CrossType,
-    price_variation_indicator: char, // TODO encode as enum somehow
+    pub paired_shares: u64,
+    pub imbalance_shares: u64,
+    pub imbalance_direction: ImbalanceDirection,
+    pub stock: ArrayString8,
+    pub far_price: Price4,
+    pub near_price: Price4,
+    pub current_ref_price: Price4,
+    pub cross_type: CrossType,
+    pub price_variation_indicator: char, // TODO encode as enum somehow
 }
 
 named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
@@ -560,11 +566,11 @@ named!(parse_imbalance_indicator<ImbalanceIndicator>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CrossTrade {
-    shares: u64,
-    stock: ArrayString<[u8; 8]>,
-    cross_price: Price4,
-    match_number: u64,
-    cross_type: CrossType,
+    pub shares: u64,
+    pub stock: ArrayString8,
+    pub cross_price: Price4,
+    pub match_number: u64,
+    pub cross_type: CrossType,
 }
 
 named!(parse_cross_trade<CrossTrade>, do_parse!(
@@ -583,12 +589,12 @@ named!(parse_cross_trade<CrossTrade>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NonCrossTrade {
-    reference: u64,
-    side: Side,
-    shares: u32,
-    stock: ArrayString<[u8; 8]>,
-    price: Price4,
-    match_number: u64,
+    pub reference: u64,
+    pub side: Side,
+    pub shares: u32,
+    pub stock: ArrayString8,
+    pub price: Price4,
+    pub match_number: u64,
 }
 
 named!(parse_noncross_trade<NonCrossTrade>, do_parse!(
@@ -606,10 +612,10 @@ named!(parse_noncross_trade<NonCrossTrade>, do_parse!(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IpoQuotingPeriod {
-    stock: ArrayString<[u8; 8]>,
-    release_time: u32,
-    release_qualifier: IpoReleaseQualifier,
-    price: Price4,
+    pub stock: ArrayString8,
+    pub release_time: u32,
+    pub release_qualifier: IpoReleaseQualifier,
+    pub price: Price4,
 }
 
 named!(parse_ipo_quoting_period<IpoQuotingPeriod>, do_parse!(
