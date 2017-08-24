@@ -308,7 +308,6 @@ pub enum Body {
         trading_state: TradingState,
         reason: ArrayString4,
     },
-    Unknown { length: u16, content: Vec<u8> },
 }
 
 named!(parse_message<Message>, do_parse!(
@@ -349,11 +348,7 @@ named!(parse_message<Message>, do_parse!(
         ), |l| Body::Breach(l)) |
         b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
                           (Body::OrderCancelled { reference, cancelled })) |
-        b'Y' => call!(parse_reg_sho_restriction) |
-        other => map!(take!(length - 11),    // tag + header = 11
-                      |slice| Body::Unknown {
-                          length, content: Vec::from(slice)
-                      })) >>
+        b'Y' => call!(parse_reg_sho_restriction)) >>
     (Message { tag, stock_locate, tracking_number, timestamp, body })
 ));
 
@@ -781,22 +776,8 @@ mod tests {
     fn handle_msg(ix: usize, msg: Result<Message>) {
         match msg {
             Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-            Ok(msg) => {
-                match msg.body {
-                    Body::Unknown { content, .. } => {
-                        eprint!("Message {} tag '{}' unknown: [", ix, msg.tag as char);
-                        for v in content {
-                            eprint!("{:02x} ", v)
-                        }
-                        eprintln!("]");
-                        panic!()
-                    }
-                    _ => {
-                        if ix % 1_000_000 == 0 {
-                            println!("Processed {}M messages", ix / 1000000)
-                        }
-                    }
-                }
+            Ok(_) => if ix % 1_000_000 == 0 {
+                println!("Processed {}M messages", ix / 1000000)
             }
         }
     }
