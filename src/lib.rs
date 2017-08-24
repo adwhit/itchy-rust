@@ -14,6 +14,8 @@
 //!     println!("{:?}", msg.unwrap())
 //! }
 //! ```
+//!
+//! The protocol specification can be found on the [NASDAQ website](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf)
 
 #[macro_use]
 extern crate error_chain;
@@ -21,11 +23,13 @@ extern crate error_chain;
 extern crate nom;
 extern crate flate2;
 extern crate arrayvec;
+extern crate decimal;
 
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 use std::fmt;
+pub use decimal::d128;
 
 use flate2::read::GzDecoder;
 use nom::{be_u8, be_u16, be_u32, be_u64, IResult, Needed};
@@ -197,8 +201,15 @@ impl<R: Read> Iterator for MessageStream<R> {
     }
 }
 
+/// Opaque type representing a price to four decimal places
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Price4(pub u32);
+pub struct Price4(u32);
+
+impl Into<d128> for Price4 {
+    fn into(self) -> d128 {
+        d128::from(self.0) / d128::from(10_000)
+    }
+}
 
 impl From<u32> for Price4 {
     fn from(v: u32) -> Price4 {
@@ -206,8 +217,15 @@ impl From<u32> for Price4 {
     }
 }
 
+/// Opaque type representing a price to eight decimal places
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Price8(pub u64);
+pub struct Price8(u64);
+
+impl Into<d128> for Price8 {
+    fn into(self) -> d128 {
+        d128::from(self.0) / d128::from(100_000_000)
+    }
+}
 
 impl From<u64> for Price8 {
     fn from(v: u64) -> Price8 {
@@ -631,6 +649,7 @@ named!(parse_ipo_quoting_period<IpoQuotingPeriod>, do_parse!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn hex_to_bytes(bytes: &[u8]) -> Vec<u8> {
         fn h2b(h: u8) -> Option<u8> {
@@ -745,6 +764,18 @@ mod tests {
         let mut stream = MessageStream::from_reader(&buf[..]);
         assert!(stream.next().unwrap().is_ok()); // first time ok
         assert!(stream.next().is_none()); // then it stops iterating
+    }
+
+    #[test]
+    fn test_price4() {
+        let p4: d128 = Price4(12340001).into();
+        assert_eq!(p4, d128::from_str("1234.0001").unwrap());
+    }
+
+    #[test]
+    fn test_price8() {
+        let p8: d128 = Price8(123400010002).into();
+        assert_eq!(p8, d128::from_str("1234.00010002").unwrap());
     }
 
     fn handle_msg(ix: usize, msg: Result<Message>) {
