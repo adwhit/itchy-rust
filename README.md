@@ -1,6 +1,8 @@
 # itchy
 
-ITCH parser in Rust 
+[![Build Status](https://travis-ci.org/adwhit/itchy-rust.svg?branch=master)](https://travis-ci.org/adwht/itchy-rust)
+
+ITCH parser in Rust
 
 Implements the NASDAQ 5.0 spec which can be found [here](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf).
 
