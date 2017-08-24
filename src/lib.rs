@@ -1,3 +1,20 @@
+//! itchy - a nom-based parser for the NASDAQ ITCH protocol 5.0
+//!
+//! It aims to sensibly handle the whole protocol.
+//! It is zero-allocation and pretty fast. It will process
+//! several million messages per second on a decent CPU.
+//!
+//! Typical usage:
+//!
+//! ```ignore
+//! extern crate itchy;
+//!
+//! let stream = itchy::MessageStream::from_file("/path/to/file.itch").unwrap();
+//! for msg in stream {
+//!     println!("{:?}", msg.unwrap())
+//! }
+//! ```
+
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
