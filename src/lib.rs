@@ -336,9 +336,10 @@ named!(parse_message<Message>, do_parse!(
         b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
         b'H' => call!(parse_trading_action) |
         b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
-        b'J' => do_parse!(stock: stock >> ref_price: be_u32 >> upper_price: be_u32 >>
-                lower_price: be_u32 >> extension: be_u32 >> (Body::LULDAuctionCollar{
-                stock, ref_price, upper_price, lower_price, extension })) |
+        b'J' => do_parse!(stock: stock >> ref_p: be_u32 >> upper_p: be_u32 >>
+                lower_p: be_u32 >> extension: be_u32 >> (Body::LULDAuctionCollar{
+                stock, ref_price: ref_p.into(), upper_price: upper_p.into(),
+                lower_price: lower_p.into(), extension})) |
         b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
         b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
         b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
