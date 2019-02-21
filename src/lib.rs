@@ -392,6 +392,7 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
         char!('A') => { |_| MarketCategory::NyseMkt } |
         char!('P') => { |_| MarketCategory::NyseArca } |
         char!('Z') => { |_| MarketCategory::BatsZExchange } |
+        char!('V') => { |_| MarketCategory::InvestorsExchange } |
         char!(' ') => { |_| MarketCategory::Unavailable }
     ) >>
     financial_status: alt!(
