@@ -45,18 +45,22 @@ use errors::*;
 pub use enums::*;
 use enums::parse_issue_subtype;
 
-const BUFSIZE: usize = 8 * 1024;
+pub use enums::*;
+use errors::*;
 
 mod enums;
 
 pub mod errors {
-    error_chain!{
+    error_chain! {
         foreign_links {
             Io(::std::io::Error);
             Nom(::nom::Err);
         }
     }
 }
+
+// Size of buffer for parsing
+const BUFSIZE: usize = 8 * 1024;
 
 /// Represents an iterable stream of ITCH protocol messages
 pub struct MessageStream<R> {
@@ -66,7 +70,7 @@ pub struct MessageStream<R> {
     bufend: usize,
     bytes_read: usize,
     read_calls: u32,
-    message_ct: u32,
+    message_ct: u32, // messages read so far
     in_error_state: bool,
 }
 
@@ -131,7 +135,6 @@ impl<R: Read> MessageStream<R> {
                 self.bufstart = 0;
                 self.bufend = right.len();
             }
-
         }
         Ok(self.reader.read(&mut self.buffer[self.bufend..])?)
     }
@@ -258,10 +261,15 @@ fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
 /// An ITCH protocol message. Refer to the protocol spec for interpretation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
+    /// Message Type
     pub tag: u8,
+    /// Integer identifying the underlying instrument updated daily
     pub stock_locate: u16,
+    /// NASDAQ internal tracking number
     pub tracking_number: u16,
+    /// Nanoseconds since midnight
     pub timestamp: u64,
+    /// Body of one of the supported message types
     pub body: Body,
 }
 
