@@ -131,7 +131,7 @@ impl<R: Read> MessageStream<R> {
             assert!(BUFSIZE - self.bufstart < 100); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
-                &left[..right.len()].copy_from_slice(&right[..]);
+                left[..right.len()].copy_from_slice(&right[..]);
                 self.bufstart = 0;
                 self.bufend = right.len();
             }
@@ -395,7 +395,7 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
     market_category: alt!(
         char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
         char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-        char!('S') => { |_| MarketCategory::NasdaqCaptialMarket } |
+        char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
         char!('N') => { |_| MarketCategory::Nyse } |
         char!('A') => { |_| MarketCategory::NyseMkt } |
         char!('P') => { |_| MarketCategory::NyseArca } |
@@ -656,8 +656,8 @@ mod tests {
     fn hex_to_bytes(bytes: &[u8]) -> Vec<u8> {
         fn h2b(h: u8) -> Option<u8> {
             match h {
-                v @ b'0'...b'9' => Some(v - b'0'),
-                v @ b'a'...b'f' => Some(v - b'a' + 10),
+                v @ b'0'..=b'9' => Some(v - b'0'),
+                v @ b'a'..=b'f' => Some(v - b'a' + 10),
                 b' ' | b'\n' => None,
                 _ => panic!("Invalid hex: {}", h as char),
             }
@@ -701,6 +701,15 @@ mod tests {
         let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10";
         let bytes = hex_to_bytes(&code[..]);
         let (rest, _) = parse_add_order(&bytes[..], false).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn add_order_with_attr() {
+        // same code as in add_order test with 4 additional `10` bytes
+        let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10 10 10 10 10";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_add_order(&bytes[..], true).unwrap();
         assert_eq!(rest.len(), 0);
     }
 

@@ -14,7 +14,7 @@ pub enum EventCode {
 pub enum MarketCategory {
     NasdaqGlobalSelect,
     NasdaqGlobalMarket,
-    NasdaqCaptialMarket,
+    NasdaqCapitalMarket,
     Nyse,
     NyseMkt,
     NyseArca,
