@@ -45,18 +45,22 @@ use errors::*;
 pub use enums::*;
 use enums::parse_issue_subtype;
 
-const BUFSIZE: usize = 8 * 1024;
+pub use enums::*;
+use errors::*;
 
 mod enums;
 
 pub mod errors {
-    error_chain!{
+    error_chain! {
         foreign_links {
             Io(::std::io::Error);
             Nom(::nom::Err);
         }
     }
 }
+
+// Size of buffer for parsing
+const BUFSIZE: usize = 8 * 1024;
 
 /// Represents an iterable stream of ITCH protocol messages
 pub struct MessageStream<R> {
@@ -66,7 +70,7 @@ pub struct MessageStream<R> {
     bufend: usize,
     bytes_read: usize,
     read_calls: u32,
-    message_ct: u32,
+    message_ct: u32, // messages read so far
     in_error_state: bool,
 }
 
@@ -127,11 +131,10 @@ impl<R: Read> MessageStream<R> {
             assert!(BUFSIZE - self.bufstart < 100); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
-                &left[..right.len()].copy_from_slice(&right[..]);
+                left[..right.len()].copy_from_slice(&right[..]);
                 self.bufstart = 0;
                 self.bufend = right.len();
             }
-
         }
         Ok(self.reader.read(&mut self.buffer[self.bufend..])?)
     }
@@ -258,10 +261,15 @@ fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
 /// An ITCH protocol message. Refer to the protocol spec for interpretation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
+    /// Message Type
     pub tag: u8,
+    /// Integer identifying the underlying instrument updated daily
     pub stock_locate: u16,
+    /// NASDAQ internal tracking number
     pub tracking_number: u16,
+    /// Nanoseconds since midnight
     pub timestamp: u64,
+    /// Body of one of the supported message types
     pub body: Body,
 }
 
@@ -398,7 +406,7 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
     market_category: alt!(
         char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
         char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-        char!('S') => { |_| MarketCategory::NasdaqCaptialMarket } |
+        char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
         char!('N') => { |_| MarketCategory::Nyse } |
         char!('A') => { |_| MarketCategory::NyseMkt } |
         char!('P') => { |_| MarketCategory::NyseArca } |
@@ -660,8 +668,8 @@ mod tests {
     fn hex_to_bytes(bytes: &[u8]) -> Vec<u8> {
         fn h2b(h: u8) -> Option<u8> {
             match h {
-                v @ b'0'...b'9' => Some(v - b'0'),
-                v @ b'a'...b'f' => Some(v - b'a' + 10),
+                v @ b'0'..=b'9' => Some(v - b'0'),
+                v @ b'a'..=b'f' => Some(v - b'a' + 10),
                 b' ' | b'\n' => None,
                 _ => panic!("Invalid hex: {}", h as char),
             }
@@ -705,6 +713,15 @@ mod tests {
         let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10";
         let bytes = hex_to_bytes(&code[..]);
         let (rest, _) = parse_add_order(&bytes[..], false).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn add_order_with_attr() {
+        // same code as in add_order test with 4 additional `10` bytes
+        let code = b"00 00 00 00 00 00 05 84 42 00 00 00 64 5a 58 5a 5a 54 20 20 20 00 00 27 10 10 10 10 10";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_add_order(&bytes[..], true).unwrap();
         assert_eq!(rest.len(), 0);
     }
 
