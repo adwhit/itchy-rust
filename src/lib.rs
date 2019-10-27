@@ -275,6 +275,13 @@ pub enum Body {
     DeleteOrder { reference: u64 },
     Imbalance(ImbalanceIndicator),
     IpoQuotingPeriod(IpoQuotingPeriod),
+    LULDAuctionCollar {
+        stock: ArrayString8,
+        ref_price: Price4,
+        upper_price: Price4,
+        lower_price: Price4,
+        extension: u32
+    },
     MwcbDeclineLevel {
         level1: Price8,
         level2: Price8,
@@ -329,6 +336,10 @@ named!(parse_message<Message>, do_parse!(
         b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
         b'H' => call!(parse_trading_action) |
         b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
+        b'J' => do_parse!(stock: stock >> ref_p: be_u32 >> upper_p: be_u32 >>
+                lower_p: be_u32 >> extension: be_u32 >> (Body::LULDAuctionCollar{
+                stock, ref_price: ref_p.into(), upper_price: upper_p.into(),
+                lower_price: lower_p.into(), extension})) |
         b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
         b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
         b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
@@ -392,6 +403,7 @@ named!(parse_stock_directory<StockDirectory>, do_parse!(
         char!('A') => { |_| MarketCategory::NyseMkt } |
         char!('P') => { |_| MarketCategory::NyseArca } |
         char!('Z') => { |_| MarketCategory::BatsZExchange } |
+        char!('V') => { |_| MarketCategory::InvestorsExchange } |
         char!(' ') => { |_| MarketCategory::Unavailable }
     ) >>
     financial_status: alt!(

@@ -19,6 +19,7 @@ pub enum MarketCategory {
     NyseMkt,
     NyseArca,
     BatsZExchange,
+    InvestorsExchange,
     Unavailable,
 }
 
