@@ -46,7 +46,6 @@ pub use enums::*;
 use errors::*;
 
 pub use enums::*;
-use errors::*;
 
 mod enums;
 
@@ -354,50 +353,78 @@ named!(
             >> stock_locate: be_u16
             >> tracking_number: be_u16
             >> timestamp: be_u48
-            >> body: switch!(value!(tag),
-        b'A' => map!(apply!(parse_add_order, false), |order| Body::AddOrder(order)) |
-        b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
-        b'C' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
-                          printable: char2bool >> price: be_u32 >>
-                          (Body::OrderExecutedWithPrice{
-                              reference, executed, match_number,
-                              printable, price: price.into() })) |
-        b'D' => map!(be_u64, |reference| Body::DeleteOrder{ reference }) |
-        b'E' => do_parse!(reference: be_u64 >> executed: be_u32 >> match_number: be_u64 >>
-                          (Body::OrderExecuted{ reference, executed, match_number })) |
-        b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
-        b'H' => call!(parse_trading_action) |
-        b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
-        b'J' => do_parse!(stock: stock >> ref_p: be_u32 >> upper_p: be_u32 >>
-                lower_p: be_u32 >> extension: be_u32 >> (Body::LULDAuctionCollar{
-                stock, ref_price: ref_p.into(), upper_price: upper_p.into(),
-                lower_price: lower_p.into(), extension})) |
-        b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
-        b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
-        b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
-        b'Q' => map!(parse_cross_trade, |ct| Body::CrossTrade(ct)) |
-        b'R' => map!(parse_stock_directory, |sd| Body::StockDirectory(sd)) |
-        b'S' => call!(parse_system_event) |
-        b'U' => map!(parse_replace_order, |order| Body::ReplaceOrder(order)) |
-        b'V' => do_parse!(l1: be_u64 >> l2: be_u64 >> l3: be_u64 >>
-                          (Body::MwcbDeclineLevel { level1: l1.into(),
-                                                           level2: l2.into(),
-                                                           level3: l3.into() })) |
-        b'W' => map!(alt!(
-            char!('1') => {|_| LevelBreached::L1 } |
-            char!('2') => {|_| LevelBreached::L2 } |
-            char!('3') => {|_| LevelBreached::L3 }
-        ), |l| Body::Breach(l)) |
-        b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
-                          (Body::OrderCancelled { reference, cancelled })) |
-        b'Y' => call!(parse_reg_sho_restriction))
-            >> (Message {
-                tag,
-                stock_locate,
-                tracking_number,
-                timestamp,
-                body
-            })
+            >> body: switch!(
+                value!(tag),
+                b'A' => map!(apply!(parse_add_order, false), |order| Body::AddOrder(order)) |
+                b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
+                b'C' => do_parse!(
+                    reference: be_u64
+                        >> executed: be_u32
+                        >> match_number: be_u64
+                        >> printable: char2bool
+                        >> price: be_u32
+                        >> (Body::OrderExecutedWithPrice {
+                            reference,
+                            executed,
+                            match_number,
+                            printable,
+                            price: price.into()
+                        })) |
+                b'D' => map!(be_u64, |reference| Body::DeleteOrder{ reference }) |
+                b'E' => do_parse!(
+                    reference: be_u64
+                        >> executed: be_u32
+                        >> match_number: be_u64
+                        >> (Body::OrderExecuted{ reference, executed, match_number })) |
+                b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
+                b'H' => call!(parse_trading_action) |
+                b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
+                b'J' => do_parse!(
+                    stock: stock
+                        >> ref_p: be_u32
+                        >> upper_p: be_u32
+                        >> lower_p: be_u32
+                        >> extension: be_u32
+                        >> (Body::LULDAuctionCollar {
+                            stock,
+                            ref_price: ref_p.into(),
+                            upper_price: upper_p.into(),
+                            lower_price: lower_p.into(),
+                            extension
+                        })) |
+                b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
+                b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
+                b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
+                b'Q' => map!(parse_cross_trade, |ct| Body::CrossTrade(ct)) |
+                b'R' => map!(parse_stock_directory, |sd| Body::StockDirectory(sd)) |
+                b'S' => call!(parse_system_event) |
+                b'U' => map!(parse_replace_order, |order| Body::ReplaceOrder(order)) |
+                b'V' => do_parse!(
+                    l1: be_u64 >>
+                        l2: be_u64 >>
+                        l3: be_u64 >>
+                        (Body::MwcbDeclineLevel {
+                            level1: l1.into(),
+                            level2: l2.into(),
+                            level3: l3.into()
+                        })) |
+                b'W' => map!(alt!(
+                    char!('1') => {|_| LevelBreached::L1 } |
+                    char!('2') => {|_| LevelBreached::L2 } |
+                    char!('3') => {|_| LevelBreached::L3 }
+                ), |l| Body::Breach(l)) |
+                b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
+                                  (Body::OrderCancelled { reference, cancelled })) |
+                b'Y' => call!(parse_reg_sho_restriction))
+            >> (
+                Message {
+                    tag,
+                    stock_locate,
+                    tracking_number,
+                    timestamp,
+                    body
+                }
+            )
     )
 );
 
@@ -439,49 +466,45 @@ named!(
     parse_stock_directory<StockDirectory>,
     do_parse!(
         stock: stock
-            >> market_category:
-                alt!(
-                    char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
-                    char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-                    char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
-                    char!('N') => { |_| MarketCategory::Nyse } |
-                    char!('A') => { |_| MarketCategory::NyseMkt } |
-                    char!('P') => { |_| MarketCategory::NyseArca } |
-                    char!('Z') => { |_| MarketCategory::BatsZExchange } |
-                    char!('V') => { |_| MarketCategory::InvestorsExchange } |
-                    char!(' ') => { |_| MarketCategory::Unavailable }
-                )
-            >> financial_status:
-                alt!(
-                    char!('N') => { |_| FinancialStatus::Normal } |
-                    char!('D') => { |_| FinancialStatus::Deficient } |
-                    char!('E') => { |_| FinancialStatus::Delinquent } |
-                    char!('Q') => { |_| FinancialStatus::Bankrupt } |
-                    char!('S') => { |_| FinancialStatus::Suspended } |
-                    char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
-                    char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
-                    char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
-                    char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
-                    char!('C') => { |_| FinancialStatus::EtpSuspended } |
-                    char!(' ') => { |_| FinancialStatus::Unavailable }
-                )
+            >> market_category: alt!(
+                char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
+                char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
+                char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
+                char!('N') => { |_| MarketCategory::Nyse } |
+                char!('A') => { |_| MarketCategory::NyseMkt } |
+                char!('P') => { |_| MarketCategory::NyseArca } |
+                char!('Z') => { |_| MarketCategory::BatsZExchange } |
+                char!('V') => { |_| MarketCategory::InvestorsExchange } |
+                char!(' ') => { |_| MarketCategory::Unavailable }
+            )
+            >> financial_status: alt!(
+                char!('N') => { |_| FinancialStatus::Normal } |
+                char!('D') => { |_| FinancialStatus::Deficient } |
+                char!('E') => { |_| FinancialStatus::Delinquent } |
+                char!('Q') => { |_| FinancialStatus::Bankrupt } |
+                char!('S') => { |_| FinancialStatus::Suspended } |
+                char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
+                char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
+                char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
+                char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
+                char!('C') => { |_| FinancialStatus::EtpSuspended } |
+                char!(' ') => { |_| FinancialStatus::Unavailable }
+            )
             >> round_lot_size: be_u32
             >> round_lots_only: char2bool
             >> issue_classification: parse_issue_classification
             >> issue_subtype: parse_issue_subtype
-            >> authenticity:
-                alt!(
-                    char!('P') => {|_| true} |
-                    char!('T') => {|_| false}
-                )
+            >> authenticity: alt!(
+                char!('P') => {|_| true} |
+                char!('T') => {|_| false}
+            )
             >> short_sale_threshold: maybe_char2bool
             >> ipo_flag: maybe_char2bool
-            >> luld_ref_price_tier:
-                alt!(
-                    char!(' ') => { |_| LuldRefPriceTier::Na } |
-                    char!('1') => { |_| LuldRefPriceTier::Tier1 } |
-                    char!('2') => { |_| LuldRefPriceTier::Tier2 }
-                )
+            >> luld_ref_price_tier: alt!(
+                char!(' ') => { |_| LuldRefPriceTier::Na } |
+                char!('1') => { |_| LuldRefPriceTier::Tier1 } |
+                char!('2') => { |_| LuldRefPriceTier::Tier2 }
+            )
             >> etp_flag: maybe_char2bool
             >> etp_leverage_factor: be_u32
             >> inverse_indicator: char2bool
@@ -519,22 +542,20 @@ named!(
         mpid: map!(take_str!(4), |s| ArrayString::from(s).unwrap())
             >> stock: stock
             >> primary_market_maker: char2bool
-            >> market_maker_mode:
-                alt!(
-                    char!('N') => {|_| MarketMakerMode::Normal} |
-                    char!('P') => {|_| MarketMakerMode::Passive} |
-                    char!('S') => {|_| MarketMakerMode::Syndicate} |
-                    char!('R') => {|_| MarketMakerMode::Presyndicate} |
-                    char!('L') => {|_| MarketMakerMode::Penalty}
-                )
-            >> market_participant_state:
-                alt!(
-                    char!('A') => {|_| MarketParticipantState::Active} |
-                    char!('E') => {|_| MarketParticipantState::Excused} |
-                    char!('W') => {|_| MarketParticipantState::Withdrawn} |
-                    char!('S') => {|_| MarketParticipantState::Suspended} |
-                    char!('D') => {|_| MarketParticipantState::Deleted}
-                )
+            >> market_maker_mode: alt!(
+                char!('N') => {|_| MarketMakerMode::Normal} |
+                char!('P') => {|_| MarketMakerMode::Passive} |
+                char!('S') => {|_| MarketMakerMode::Syndicate} |
+                char!('R') => {|_| MarketMakerMode::Presyndicate} |
+                char!('L') => {|_| MarketMakerMode::Penalty}
+            )
+            >> market_participant_state: alt!(
+                char!('A') => {|_| MarketParticipantState::Active} |
+                char!('E') => {|_| MarketParticipantState::Excused} |
+                char!('W') => {|_| MarketParticipantState::Withdrawn} |
+                char!('S') => {|_| MarketParticipantState::Suspended} |
+                char!('D') => {|_| MarketParticipantState::Deleted}
+            )
             >> (MarketParticipantPosition {
                 mpid,
                 stock,
@@ -549,12 +570,11 @@ named!(
     parse_reg_sho_restriction<Body>,
     do_parse!(
         stock: stock
-            >> action:
-                alt!(
-                    char!('0') => {|_| RegShoAction::None} |
-                    char!('1') => {|_| RegShoAction::Intraday} |
-                    char!('2') => {|_| RegShoAction::Extant}
-                )
+            >> action: alt!(
+                char!('0') => {|_| RegShoAction::None} |
+                char!('1') => {|_| RegShoAction::Intraday} |
+                char!('2') => {|_| RegShoAction::Extant}
+            )
             >> (Body::RegShoRestriction { stock, action })
     )
 );
@@ -563,14 +583,14 @@ named!(
     parse_trading_action<Body>,
     do_parse!(
         stock: stock >>
-    trading_state: alt!(
-        char!('H') => {|_| TradingState::Halted} |
-        char!('P') => {|_| TradingState::Paused} |
-        char!('Q') => {|_| TradingState::QuotationOnly} |
-        char!('T') => {|_| TradingState::Trading}
-    ) >> be_u8 >> // skip reserved byte
-    reason: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
-    (Body::TradingAction { stock, trading_state, reason })
+            trading_state: alt!(
+                char!('H') => {|_| TradingState::Halted} |
+                char!('P') => {|_| TradingState::Paused} |
+                char!('Q') => {|_| TradingState::QuotationOnly} |
+                char!('T') => {|_| TradingState::Trading}
+            ) >> be_u8 >> // skip reserved byte
+            reason: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
+            (Body::TradingAction { stock, trading_state, reason })
     )
 );
 
@@ -652,23 +672,21 @@ named!(
     do_parse!(
         paired_shares: be_u64
             >> imbalance_shares: be_u64
-            >> imbalance_direction:
-                alt!(
-                    char!('B') => {|_| ImbalanceDirection::Buy } |
-                    char!('S') => {|_| ImbalanceDirection::Sell } |
-                    char!('N') => {|_| ImbalanceDirection::NoImbalance } |
-                    char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
-                )
+            >> imbalance_direction: alt!(
+                char!('B') => {|_| ImbalanceDirection::Buy } |
+                char!('S') => {|_| ImbalanceDirection::Sell } |
+                char!('N') => {|_| ImbalanceDirection::NoImbalance } |
+                char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
+            )
             >> stock: stock
             >> far_price: be_u32
             >> near_price: be_u32
             >> current_ref_price: be_u32
-            >> cross_type:
-                alt!(
-                    char!('O') => {|_| CrossType::Opening} |
-                    char!('C') => {|_| CrossType::Closing} |
-                    char!('H') => {|_| CrossType::IpoOrHalted}
-                )
+            >> cross_type: alt!(
+                char!('O') => {|_| CrossType::Opening} |
+                char!('C') => {|_| CrossType::Closing} |
+                char!('H') => {|_| CrossType::IpoOrHalted}
+            )
             >> price_variation_indicator: be_u8
             >> (ImbalanceIndicator {
                 paired_shares,
@@ -700,13 +718,12 @@ named!(
             >> stock: stock
             >> price: be_u32
             >> match_number: be_u64
-            >> cross_type:
-                alt!(
-                    char!('O') => {|_| CrossType::Opening} |
-                    char!('C') => {|_| CrossType::Closing} |
-                    char!('H') => {|_| CrossType::IpoOrHalted} |
-                    char!('I') => {|_| CrossType::Intraday}
-                )
+            >> cross_type: alt!(
+                char!('O') => {|_| CrossType::Opening} |
+                char!('C') => {|_| CrossType::Closing} |
+                char!('H') => {|_| CrossType::IpoOrHalted} |
+                char!('I') => {|_| CrossType::Intraday}
+            )
             >> (CrossTrade {
                 shares,
                 stock,
@@ -763,11 +780,10 @@ named!(
     do_parse!(
         stock: stock
             >> release_time: be_u32
-            >> release_qualifier:
-                alt!(
-                    char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
-                    char!('C') => { |_| IpoReleaseQualifier::Cancelled }
-                )
+            >> release_qualifier: alt!(
+                char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
+                char!('C') => { |_| IpoReleaseQualifier::Cancelled }
+            )
             >> price: be_u32
             >> (IpoQuotingPeriod {
                 stock,
@@ -931,14 +947,14 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_full_parse_13_m() {
+    fn test_full_parse() {
         // Download sample data from ftp://emi.nasdaq.com/ITCH/
-        let stream = MessageStream::from_gzip("sample-data/20190830.PSX_ITCH_50.gz").unwrap();
+        let stream = MessageStream::from_file("sample-data/20190830.PSX_ITCH_50").unwrap();
         let mut ct = 0;
         for (ix, msg) in stream.enumerate() {
             ct = ix;
             handle_msg(ix, msg)
         }
-        assert_eq!(ct, 13761739)
+        assert_eq!(ct, 40030397)
     }
 }
