@@ -1,4 +1,4 @@
-use nom::{IResult, be_u8};
+use nom::{be_u8, IResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventCode {
@@ -211,7 +211,6 @@ pub(crate) fn parse_issue_subtype(input: &[u8]) -> IResult<&[u8], IssueSubType> 
         })
     })
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LuldRefPriceTier {
