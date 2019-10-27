@@ -33,7 +33,7 @@ use std::path::Path;
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
-use nom::{be_u16, be_u32, be_u64, be_u8, IResult, Needed};
+use nom::{be_u16, be_u32, be_u64, be_u8, IResult, Err, Needed};
 
 /// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
 pub type ArrayString4 = ArrayString<[u8; 4]>;
@@ -53,7 +53,7 @@ pub mod errors {
     error_chain! {
         foreign_links {
             Io(::std::io::Error);
-            Nom(::nom::Err);
+            Nom(::nom::Err<u8, u32>);
         }
     }
 }
@@ -83,7 +83,7 @@ impl MessageStream<File> {
 impl MessageStream<GzDecoder<File>> {
     pub fn from_gzip<P: AsRef<Path>>(path: P) -> Result<MessageStream<GzDecoder<File>>> {
         let file = File::open(path)?;
-        let reader = GzDecoder::new(file)?;
+        let reader = GzDecoder::new(file);
         Ok(MessageStream::from_reader(reader))
     }
 }
@@ -143,11 +143,10 @@ impl<R: Read> Iterator for MessageStream<R> {
     type Item = Result<Message>;
 
     fn next(&mut self) -> Option<Result<Message>> {
-        use IResult::*;
         {
             let buf = &self.buffer[self.bufstart..self.bufend];
             match parse_message(buf) {
-                Done(rest, msg) => {
+                Ok((rest, msg)) => {
                     // TODO could this logic be sped up? Or is it already pretty fast?
                     // it should just consist of pointer arithmetic
                     self.bufstart = self.bufend - rest.len();
@@ -155,7 +154,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                     self.in_error_state = false;
                     return Some(Ok(msg));
                 }
-                Error(e) => {
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                     // We need to inform user of error, but don't want to get
                     // stuck in an infinite loop if error is ignored
                     // (but obviously shouldn't fail silently on error either)
@@ -164,10 +163,10 @@ impl<R: Read> Iterator for MessageStream<R> {
                         return None;
                     } else {
                         self.in_error_state = true;
-                        return Some(Err(format!("Parse failed: {}", e).into()));
+                        return Some(Err(format!("Parse failed: {:?}", e.into_error_kind()).into()));
                     }
                 }
-                Incomplete(_) => {
+                Err(Err::Incomplete(_)) => {
                     // fall through to below... necessary to appease borrow checker
                 }
             }
@@ -258,7 +257,7 @@ named!(
 #[inline]
 fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
-        IResult::Incomplete(Needed::Size(6))
+        IResult::Err(Err::Incomplete(Needed::Size(6)))
     } else {
         let res = ((i[0] as u64) << 40)
             + ((i[1] as u64) << 32)
@@ -266,7 +265,7 @@ fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
             + ((i[3] as u64) << 16)
             + ((i[4] as u64) << 8)
             + i[5] as u64;
-        IResult::Done(&i[6..], res)
+        IResult::Ok((&i[6..], res))
     }
 }
 
@@ -348,7 +347,7 @@ pub enum Body {
 named!(
     parse_message<Message>,
     do_parse!(
-        length: be_u16
+        _length: be_u16
             >> tag: be_u8
             >> stock_locate: be_u16
             >> tracking_number: be_u16

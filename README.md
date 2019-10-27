@@ -5,24 +5,18 @@
 
 ITCH parser library for Rust. Implements the NASDAQ 5.0 spec which can be found [here](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf).
 
-It is based on [nom](http://github.com/geal/nom) and despite not having
-been optimized much, it is zero-allocation and pretty fast, benching
-~7M messages/second on my laptop (Intel Core m3-6Y30).
+It is zero-allocation (thanks [nom](http://github.com/geal/nom)!)
+pretty fast, parsing around 20M messages/second on my XPS 9370.
 
 ## Usage
 
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-itchy = "0.1"
-```
-and this to your crate root:
-
-```rust
-extern crate itchy;
+itchy = "0.2"
 ```
 
-Simple example:
+Simple usage example:
 
 ```rust
 let stream = itchy::MessageStream::from_file("/path/to/file.itch").unwrap();
@@ -31,4 +25,4 @@ for msg in stream {
 }
 ```
 
-See the [API docs](https://docs.rs/itchy/0.1.0/) for more information.
+See the [API docs](https://docs.rs/itchy/0.2.0/) for more information.
