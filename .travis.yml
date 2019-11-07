@@ -1,1 +1,8 @@
 language: rust
+rust:
+  - stable
+
+before_script:
+  # the script below adds an environment variable to the shell
+  # it's important to "source" it (using ".") so cargo test can use the env variable
+  . ./download_recent_itch50.sh

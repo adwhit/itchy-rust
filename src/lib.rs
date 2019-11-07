@@ -933,27 +933,18 @@ mod tests {
         assert_eq!(p8, d128::from_str("1234.00010002").unwrap());
     }
 
-    fn handle_msg(ix: usize, msg: Result<Message>) {
-        match msg {
-            Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-            Ok(_) => {
-                if ix % 1_000_000 == 0 {
-                    println!("Processed {}M messages", ix / 1000000)
-                }
+    #[test]
+    fn full_parse() {
+        use std::env;
+        let md_filename = env::var("MARKET_DATA_TEST_FILE");
+        if let Err(_e) = md_filename {
+            println!("Environment variable wasn't set, ignoring this test");
+        } else {
+            let stream = MessageStream::from_file(md_filename.unwrap()).unwrap();
+            // let stream = MessageStream::from_file("20190730.BX_ITCH_50").unwrap();
+            for msg in stream {
+                assert!(msg.is_ok());
             }
         }
-    }
-
-    #[test]
-    #[ignore]
-    fn test_full_parse() {
-        // Download sample data from ftp://emi.nasdaq.com/ITCH/
-        let stream = MessageStream::from_file("sample-data/20190830.PSX_ITCH_50").unwrap();
-        let mut ct = 0;
-        for (ix, msg) in stream.enumerate() {
-            ct = ix;
-            handle_msg(ix, msg)
-        }
-        assert_eq!(ct, 40030397)
     }
 }
