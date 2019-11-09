@@ -7,10 +7,10 @@ MD_FILENAME="$(curl -s ftp://emi.nasdaq.com/ITCH/ | egrep "PSX_ITCH_?50\.gz$" | 
 echo "$MD_FILENAME"
 
 # Use the name to download it
-# curl -v "ftp://emi.nasdaq.com/ITCH/${MD_FILENAME}" -o ${MD_FILENAME}
+curl -v "ftp://emi.nasdaq.com/ITCH/${MD_FILENAME}" -o ${MD_FILENAME}
 
 # download its checksum.
-# curl -v "ftp://emi.nasdaq.com/ITCH/${MD_FILENAME}.md5sum" -o "${MD_FILENAME}.md5sum"
+curl -v "ftp://emi.nasdaq.com/ITCH/${MD_FILENAME}.md5sum" -o "${MD_FILENAME}.md5sum"
 
 # if the checksum matches the expected checksum
 if diff <(md5sum ${MD_FILENAME} | awk ' { print $1 } ') <(cat "${MD_FILENAME}.md5sum" | awk ' { print $1 } ') ; then
