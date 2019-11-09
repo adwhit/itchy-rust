@@ -3,7 +3,7 @@ set -e
 # find the smallest ITCH50.gz available on the ftp server today and print its name
 
 ## curl for a list of files, find ITCH50 files, sort them by size (3rd column)
-curl -k --verbose ftp://emi.nasdaq.com/ITCH/
+curl -k --verbose --disable-epsv ftp://emi.nasdaq.com/ITCH/
 # MD_FILENAME="$(curl -s ftp://emi.nasdaq.com/ITCH/ | egrep "PSX_ITCH_?50\.gz$" | sort -k3 -h | head -1 | awk ' { print $4 } ')"
 # echo "$MD_FILENAME"
 
