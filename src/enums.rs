@@ -286,3 +286,11 @@ pub enum LevelBreached {
     L2,
     L3,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterestFlag {
+    RPIAvailableBuySide,
+    RPIAvailableSellSide,
+    RPIAvailableBothSides,
+    RPINoneAvailable,
+}
