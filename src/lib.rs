@@ -163,7 +163,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                         return None;
                     } else {
                         self.in_error_state = true;
-                        return Some(Err(format!("Parse failed: {:?}", e.into_error_kind()).into()));
+                        return Some(Err(format!("Parse failed: {:?}, buffer context {:?}", e.into_error_kind(), &self.buffer[self.bufstart..self.bufstart + 20]).into()));
                     }
                 }
                 Err(Err::Incomplete(_)) => {
@@ -342,6 +342,7 @@ pub enum Body {
         trading_state: TradingState,
         reason: ArrayString4,
     },
+    RetailPriceImprovementIndicator(RetailPriceImprovementIndicator),
 }
 
 named!(
@@ -393,6 +394,7 @@ named!(
                         })) |
                 b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
                 b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
+                b'N' => map!(parse_retail_price_improvement_indicator, |pp| Body::RetailPriceImprovementIndicator(pp)) |
                 b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
                 b'Q' => map!(parse_cross_trade, |ct| Body::CrossTrade(ct)) |
                 b'R' => map!(parse_stock_directory, |sd| Body::StockDirectory(sd)) |
@@ -733,6 +735,30 @@ named!(
     )
 );
 
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetailPriceImprovementIndicator {
+    pub stock: ArrayString8,
+    pub interest_flag: InterestFlag,
+}
+
+named!(
+    parse_retail_price_improvement_indicator<RetailPriceImprovementIndicator>,
+    do_parse!(
+        stock: stock
+            >> interest_flag: alt!(
+                char!('B') => {|_| InterestFlag::RPIAvailableBuySide} |
+                char!('S') => {|_| InterestFlag::RPIAvailableSellSide} |
+                char!('A') => {|_| InterestFlag::RPIAvailableBothSides} |
+                char!('N') => {|_| InterestFlag::RPINoneAvailable}
+            )
+            >> (RetailPriceImprovementIndicator {
+                stock,
+                interest_flag
+            })
+    )
+);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NonCrossTrade {
     pub reference: u64,
@@ -877,6 +903,14 @@ mod tests {
                     00 00 00 00 00 00 00 00 03 c0 43";
         let bytes = hex_to_bytes(&code[..]);
         let (rest, _) = parse_cross_trade(&bytes[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+    }
+
+    #[test]
+    fn test_retail_price_improvement_indicator() {
+        let code = b"45 53 53 41 20 20 20 20 4e";
+        let bytes = hex_to_bytes(&code[..]);
+        let (rest, _) = parse_retail_price_improvement_indicator(&bytes[..]).unwrap();
         assert_eq!(rest.len(), 0);
     }
 
