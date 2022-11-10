@@ -189,7 +189,7 @@ pub(crate) fn parse_issue_subtype(input: &[u8]) -> IResult<&[u8], IssueSubType> 
             b"PP" => PoisonPill,
             b"PU" => PartnershipUnits,
             b"Q " => ClosedEndFunds,
-            b"R" => RegS,
+            b"R " => RegS,
             b"RC" => CommodityRedeemableCommodityLinkedSecurities,
             b"RF" => ETNRedeemableFuturesLinkedSecurities,
             b"RT" => REIT,
