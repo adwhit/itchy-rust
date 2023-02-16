@@ -205,6 +205,12 @@ impl<R: Read> Iterator for MessageStream<R> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Price4(u32);
 
+impl Price4 {
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 impl Into<d128> for Price4 {
     fn into(self) -> d128 {
         d128::from(self.0) / d128::from(10_000)
@@ -220,6 +226,12 @@ impl From<u32> for Price4 {
 /// Opaque type representing a price to eight decimal places
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Price8(u64);
+
+impl Price8 {
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
 
 impl Into<d128> for Price8 {
     fn into(self) -> d128 {
