@@ -26,6 +26,7 @@ extern crate decimal;
 extern crate flate2;
 
 pub use decimal::d128;
+use serde::{Serialize, Deserialize};
 use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
@@ -202,7 +203,7 @@ impl<R: Read> Iterator for MessageStream<R> {
 }
 
 /// Opaque type representing a price to four decimal places
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Price4(u32);
 
 impl Price4 {
@@ -224,7 +225,7 @@ impl From<u32> for Price4 {
 }
 
 /// Opaque type representing a price to eight decimal places
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Price8(u64);
 
 impl Price8 {
@@ -307,7 +308,7 @@ pub struct Message {
 }
 
 /// The message body. Refer to the protocol spec for interpretation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Body {
     AddOrder(AddOrder),
     Breach(LevelBreached),
@@ -451,7 +452,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StockDirectory {
     pub stock: ArrayString8,
     pub market_category: MarketCategory,
@@ -550,7 +551,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketParticipantPosition {
     pub mpid: ArrayString4,
     pub stock: ArrayString8,
@@ -617,7 +618,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddOrder {
     pub reference: u64,
     pub side: Side,
@@ -653,7 +654,7 @@ fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> 
     )
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReplaceOrder {
     pub old_reference: u64,
     pub new_reference: u64,
@@ -677,7 +678,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImbalanceIndicator {
     pub paired_shares: u64,
     pub imbalance_shares: u64,
@@ -725,7 +726,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CrossTrade {
     pub shares: u64,
     pub stock: ArrayString8,
@@ -759,7 +760,7 @@ named!(
 );
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RetailPriceImprovementIndicator {
     pub stock: ArrayString8,
     pub interest_flag: InterestFlag,
@@ -782,7 +783,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonCrossTrade {
     pub reference: u64,
     pub side: Side,
@@ -815,7 +816,7 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IpoQuotingPeriod {
     pub stock: ArrayString8,
     pub release_time: u32,
