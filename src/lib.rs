@@ -733,7 +733,8 @@ named!(
                 char!('O') => {|_| CrossType::Opening} |
                 char!('C') => {|_| CrossType::Closing} |
                 char!('H') => {|_| CrossType::IpoOrHalted} |
-                char!('I') => {|_| CrossType::Intraday}
+                char!('I') => {|_| CrossType::Intraday} |
+                char!('A') => {|_| CrossType::ExtendedTradingClose}
             )
             >> (CrossTrade {
                 shares,

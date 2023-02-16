@@ -272,6 +272,7 @@ pub enum CrossType {
     Closing,
     IpoOrHalted,
     Intraday,
+    ExtendedTradingClose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
