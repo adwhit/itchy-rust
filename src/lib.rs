@@ -250,6 +250,16 @@ named!(
 );
 
 named!(
+    parse_etp_flag<Option<bool>>,
+    alt!(
+        char!('Y') => {|_| Some(true)} |
+        char!('N') => {|_| Some(false)} |
+        char!(' ') => {|_| None} |
+        char!('M') => {|_| Some(true)}
+    )
+);
+
+named!(
     stock<ArrayString8>,
     map!(take_str!(8), |s| ArrayString::from(s).unwrap())
 );
@@ -506,7 +516,7 @@ named!(
                 char!('1') => { |_| LuldRefPriceTier::Tier1 } |
                 char!('2') => { |_| LuldRefPriceTier::Tier2 }
             )
-            >> etp_flag: maybe_char2bool
+            >> etp_flag: parse_etp_flag
             >> etp_leverage_factor: be_u32
             >> inverse_indicator: char2bool
             >> (StockDirectory {
