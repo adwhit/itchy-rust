@@ -26,7 +26,6 @@ extern crate decimal;
 extern crate flate2;
 
 pub use decimal::d128;
-use serde::{Serialize, Deserialize};
 use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
@@ -34,7 +33,7 @@ use std::path::Path;
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
-use nom::{be_u16, be_u32, be_u64, be_u8, IResult, Err, Needed};
+use nom::{be_u16, be_u32, be_u64, be_u8, Err, IResult, Needed};
 
 /// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
 pub type ArrayString4 = ArrayString<[u8; 4]>;
@@ -164,7 +163,12 @@ impl<R: Read> Iterator for MessageStream<R> {
                         return None;
                     } else {
                         self.in_error_state = true;
-                        return Some(Err(format!("Parse failed: {:?}, buffer context {:?}", e.into_error_kind(), &self.buffer[self.bufstart..self.bufstart + 20]).into()));
+                        return Some(Err(format!(
+                            "Parse failed: {:?}, buffer context {:?}",
+                            e.into_error_kind(),
+                            &self.buffer[self.bufstart..self.bufstart + 20]
+                        )
+                        .into()));
                     }
                 }
                 Err(Err::Incomplete(_)) => {
@@ -203,7 +207,8 @@ impl<R: Read> Iterator for MessageStream<R> {
 }
 
 /// Opaque type representing a price to four decimal places
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Price4(u32);
 
 impl Price4 {
@@ -225,7 +230,8 @@ impl From<u32> for Price4 {
 }
 
 /// Opaque type representing a price to eight decimal places
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Price8(u64);
 
 impl Price8 {
@@ -308,7 +314,8 @@ pub struct Message {
 }
 
 /// The message body. Refer to the protocol spec for interpretation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Body {
     AddOrder(AddOrder),
     Breach(LevelBreached),
@@ -440,19 +447,18 @@ named!(
                 b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
                                   (Body::OrderCancelled { reference, cancelled })) |
                 b'Y' => call!(parse_reg_sho_restriction))
-            >> (
-                Message {
-                    tag,
-                    stock_locate,
-                    tracking_number,
-                    timestamp,
-                    body
-                }
-            )
+            >> (Message {
+                tag,
+                stock_locate,
+                tracking_number,
+                timestamp,
+                body
+            })
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StockDirectory {
     pub stock: ArrayString8,
     pub market_category: MarketCategory,
@@ -490,45 +496,49 @@ named!(
     parse_stock_directory<StockDirectory>,
     do_parse!(
         stock: stock
-            >> market_category: alt!(
-                char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
-                char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-                char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
-                char!('N') => { |_| MarketCategory::Nyse } |
-                char!('A') => { |_| MarketCategory::NyseMkt } |
-                char!('P') => { |_| MarketCategory::NyseArca } |
-                char!('Z') => { |_| MarketCategory::BatsZExchange } |
-                char!('V') => { |_| MarketCategory::InvestorsExchange } |
-                char!(' ') => { |_| MarketCategory::Unavailable }
-            )
-            >> financial_status: alt!(
-                char!('N') => { |_| FinancialStatus::Normal } |
-                char!('D') => { |_| FinancialStatus::Deficient } |
-                char!('E') => { |_| FinancialStatus::Delinquent } |
-                char!('Q') => { |_| FinancialStatus::Bankrupt } |
-                char!('S') => { |_| FinancialStatus::Suspended } |
-                char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
-                char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
-                char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
-                char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
-                char!('C') => { |_| FinancialStatus::EtpSuspended } |
-                char!(' ') => { |_| FinancialStatus::Unavailable }
-            )
+            >> market_category:
+                alt!(
+                    char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
+                    char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
+                    char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
+                    char!('N') => { |_| MarketCategory::Nyse } |
+                    char!('A') => { |_| MarketCategory::NyseMkt } |
+                    char!('P') => { |_| MarketCategory::NyseArca } |
+                    char!('Z') => { |_| MarketCategory::BatsZExchange } |
+                    char!('V') => { |_| MarketCategory::InvestorsExchange } |
+                    char!(' ') => { |_| MarketCategory::Unavailable }
+                )
+            >> financial_status:
+                alt!(
+                    char!('N') => { |_| FinancialStatus::Normal } |
+                    char!('D') => { |_| FinancialStatus::Deficient } |
+                    char!('E') => { |_| FinancialStatus::Delinquent } |
+                    char!('Q') => { |_| FinancialStatus::Bankrupt } |
+                    char!('S') => { |_| FinancialStatus::Suspended } |
+                    char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
+                    char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
+                    char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
+                    char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
+                    char!('C') => { |_| FinancialStatus::EtpSuspended } |
+                    char!(' ') => { |_| FinancialStatus::Unavailable }
+                )
             >> round_lot_size: be_u32
             >> round_lots_only: char2bool
             >> issue_classification: parse_issue_classification
             >> issue_subtype: parse_issue_subtype
-            >> authenticity: alt!(
-                char!('P') => {|_| true} |
-                char!('T') => {|_| false}
-            )
+            >> authenticity:
+                alt!(
+                    char!('P') => {|_| true} |
+                    char!('T') => {|_| false}
+                )
             >> short_sale_threshold: maybe_char2bool
             >> ipo_flag: maybe_char2bool
-            >> luld_ref_price_tier: alt!(
-                char!(' ') => { |_| LuldRefPriceTier::Na } |
-                char!('1') => { |_| LuldRefPriceTier::Tier1 } |
-                char!('2') => { |_| LuldRefPriceTier::Tier2 }
-            )
+            >> luld_ref_price_tier:
+                alt!(
+                    char!(' ') => { |_| LuldRefPriceTier::Na } |
+                    char!('1') => { |_| LuldRefPriceTier::Tier1 } |
+                    char!('2') => { |_| LuldRefPriceTier::Tier2 }
+                )
             >> etp_flag: parse_etp_flag
             >> etp_leverage_factor: be_u32
             >> inverse_indicator: char2bool
@@ -551,7 +561,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketParticipantPosition {
     pub mpid: ArrayString4,
     pub stock: ArrayString8,
@@ -566,20 +577,22 @@ named!(
         mpid: map!(take_str!(4), |s| ArrayString::from(s).unwrap())
             >> stock: stock
             >> primary_market_maker: char2bool
-            >> market_maker_mode: alt!(
-                char!('N') => {|_| MarketMakerMode::Normal} |
-                char!('P') => {|_| MarketMakerMode::Passive} |
-                char!('S') => {|_| MarketMakerMode::Syndicate} |
-                char!('R') => {|_| MarketMakerMode::Presyndicate} |
-                char!('L') => {|_| MarketMakerMode::Penalty}
-            )
-            >> market_participant_state: alt!(
-                char!('A') => {|_| MarketParticipantState::Active} |
-                char!('E') => {|_| MarketParticipantState::Excused} |
-                char!('W') => {|_| MarketParticipantState::Withdrawn} |
-                char!('S') => {|_| MarketParticipantState::Suspended} |
-                char!('D') => {|_| MarketParticipantState::Deleted}
-            )
+            >> market_maker_mode:
+                alt!(
+                    char!('N') => {|_| MarketMakerMode::Normal} |
+                    char!('P') => {|_| MarketMakerMode::Passive} |
+                    char!('S') => {|_| MarketMakerMode::Syndicate} |
+                    char!('R') => {|_| MarketMakerMode::Presyndicate} |
+                    char!('L') => {|_| MarketMakerMode::Penalty}
+                )
+            >> market_participant_state:
+                alt!(
+                    char!('A') => {|_| MarketParticipantState::Active} |
+                    char!('E') => {|_| MarketParticipantState::Excused} |
+                    char!('W') => {|_| MarketParticipantState::Withdrawn} |
+                    char!('S') => {|_| MarketParticipantState::Suspended} |
+                    char!('D') => {|_| MarketParticipantState::Deleted}
+                )
             >> (MarketParticipantPosition {
                 mpid,
                 stock,
@@ -594,11 +607,12 @@ named!(
     parse_reg_sho_restriction<Body>,
     do_parse!(
         stock: stock
-            >> action: alt!(
-                char!('0') => {|_| RegShoAction::None} |
-                char!('1') => {|_| RegShoAction::Intraday} |
-                char!('2') => {|_| RegShoAction::Extant}
-            )
+            >> action:
+                alt!(
+                    char!('0') => {|_| RegShoAction::None} |
+                    char!('1') => {|_| RegShoAction::Intraday} |
+                    char!('2') => {|_| RegShoAction::Extant}
+                )
             >> (Body::RegShoRestriction { stock, action })
     )
 );
@@ -618,7 +632,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AddOrder {
     pub reference: u64,
     pub side: Side,
@@ -654,7 +669,8 @@ fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> 
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReplaceOrder {
     pub old_reference: u64,
     pub new_reference: u64,
@@ -678,7 +694,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImbalanceIndicator {
     pub paired_shares: u64,
     pub imbalance_shares: u64,
@@ -696,21 +713,23 @@ named!(
     do_parse!(
         paired_shares: be_u64
             >> imbalance_shares: be_u64
-            >> imbalance_direction: alt!(
-                char!('B') => {|_| ImbalanceDirection::Buy } |
-                char!('S') => {|_| ImbalanceDirection::Sell } |
-                char!('N') => {|_| ImbalanceDirection::NoImbalance } |
-                char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
-            )
+            >> imbalance_direction:
+                alt!(
+                    char!('B') => {|_| ImbalanceDirection::Buy } |
+                    char!('S') => {|_| ImbalanceDirection::Sell } |
+                    char!('N') => {|_| ImbalanceDirection::NoImbalance } |
+                    char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
+                )
             >> stock: stock
             >> far_price: be_u32
             >> near_price: be_u32
             >> current_ref_price: be_u32
-            >> cross_type: alt!(
-                char!('O') => {|_| CrossType::Opening} |
-                char!('C') => {|_| CrossType::Closing} |
-                char!('H') => {|_| CrossType::IpoOrHalted}
-            )
+            >> cross_type:
+                alt!(
+                    char!('O') => {|_| CrossType::Opening} |
+                    char!('C') => {|_| CrossType::Closing} |
+                    char!('H') => {|_| CrossType::IpoOrHalted}
+                )
             >> price_variation_indicator: be_u8
             >> (ImbalanceIndicator {
                 paired_shares,
@@ -726,7 +745,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CrossTrade {
     pub shares: u64,
     pub stock: ArrayString8,
@@ -742,13 +762,14 @@ named!(
             >> stock: stock
             >> price: be_u32
             >> match_number: be_u64
-            >> cross_type: alt!(
-                char!('O') => {|_| CrossType::Opening} |
-                char!('C') => {|_| CrossType::Closing} |
-                char!('H') => {|_| CrossType::IpoOrHalted} |
-                char!('I') => {|_| CrossType::Intraday} |
-                char!('A') => {|_| CrossType::ExtendedTradingClose}
-            )
+            >> cross_type:
+                alt!(
+                    char!('O') => {|_| CrossType::Opening} |
+                    char!('C') => {|_| CrossType::Closing} |
+                    char!('H') => {|_| CrossType::IpoOrHalted} |
+                    char!('I') => {|_| CrossType::Intraday} |
+                    char!('A') => {|_| CrossType::ExtendedTradingClose}
+                )
             >> (CrossTrade {
                 shares,
                 stock,
@@ -759,8 +780,8 @@ named!(
     )
 );
 
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RetailPriceImprovementIndicator {
     pub stock: ArrayString8,
     pub interest_flag: InterestFlag,
@@ -770,12 +791,13 @@ named!(
     parse_retail_price_improvement_indicator<RetailPriceImprovementIndicator>,
     do_parse!(
         stock: stock
-            >> interest_flag: alt!(
-                char!('B') => {|_| InterestFlag::RPIAvailableBuySide} |
-                char!('S') => {|_| InterestFlag::RPIAvailableSellSide} |
-                char!('A') => {|_| InterestFlag::RPIAvailableBothSides} |
-                char!('N') => {|_| InterestFlag::RPINoneAvailable}
-            )
+            >> interest_flag:
+                alt!(
+                    char!('B') => {|_| InterestFlag::RPIAvailableBuySide} |
+                    char!('S') => {|_| InterestFlag::RPIAvailableSellSide} |
+                    char!('A') => {|_| InterestFlag::RPIAvailableBothSides} |
+                    char!('N') => {|_| InterestFlag::RPINoneAvailable}
+                )
             >> (RetailPriceImprovementIndicator {
                 stock,
                 interest_flag
@@ -783,7 +805,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NonCrossTrade {
     pub reference: u64,
     pub side: Side,
@@ -816,7 +839,8 @@ named!(
     )
 );
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IpoQuotingPeriod {
     pub stock: ArrayString8,
     pub release_time: u32,
@@ -829,10 +853,11 @@ named!(
     do_parse!(
         stock: stock
             >> release_time: be_u32
-            >> release_qualifier: alt!(
-                char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
-                char!('C') => { |_| IpoReleaseQualifier::Cancelled }
-            )
+            >> release_qualifier:
+                alt!(
+                    char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
+                    char!('C') => { |_| IpoReleaseQualifier::Cancelled }
+                )
             >> price: be_u32
             >> (IpoQuotingPeriod {
                 stock,
