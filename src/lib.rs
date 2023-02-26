@@ -36,10 +36,10 @@ use flate2::read::GzDecoder;
 use nom::{be_u16, be_u32, be_u64, be_u8, Err, IResult, Needed};
 
 /// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
-pub type ArrayString4 = ArrayString<[u8; 4]>;
+pub type ArrayString4 = ArrayString<4>;
 
 /// Stack-allocated string of size 8 bytes (re-exported from `arrayvec`)
-pub type ArrayString8 = ArrayString<[u8; 8]>;
+pub type ArrayString8 = ArrayString<8>;
 
 use enums::parse_issue_subtype;
 pub use enums::*;

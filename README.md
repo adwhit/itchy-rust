@@ -1,6 +1,6 @@
 # itchy
 
-[![Build Status](https://travis-ci.org/adwhit/itchy-rust.svg?branch=master)](https://travis-ci.org/adwhit/itchy-rust)
+![Build Status](https://github.com/adwhit/itchy-rust/workflows/CI/badge.svg)
 [![Crates.io Version](https://img.shields.io/crates/v/itchy.svg)](https://crates.io/crates/itchy)
 
 ITCH parser library for Rust. Implements the NASDAQ 5.0 spec which can be found [here](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf).
