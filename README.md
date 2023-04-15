@@ -25,4 +25,4 @@ for msg in stream {
 }
 ```
 
-See the [API docs](https://docs.rs/itchy/0.2.0/) for more information.
+See the [API docs](https://docs.rs/itchy/latest/itchy/) for more information.
