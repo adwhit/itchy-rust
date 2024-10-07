@@ -26,10 +26,10 @@ extern crate decimal;
 extern crate flate2;
 
 pub use decimal::d128;
-use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
+use std::{fmt, num::NonZero};
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
@@ -128,7 +128,7 @@ impl<R: Read> MessageStream<R> {
             // copy the remnants back to the beginning of the buffer
             // (this should only be a few bytes)
             assert!(self.bufstart > BUFSIZE / 2); // safety check
-                                                           // TODO this appears to assume that the buffer was 'full' to start with
+                                                  // TODO this appears to assume that the buffer was 'full' to start with
             assert!(BUFSIZE - self.bufstart < 100); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
@@ -156,18 +156,18 @@ impl<R: Read> Iterator for MessageStream<R> {
                     self.in_error_state = false;
                     return Some(Ok(msg));
                 }
-                Err(Err::Error((_, e))) | Err(Err::Failure((_, e))) => {
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                     // We need to inform user of error, but don't want to get
                     // stuck in an infinite loop if error is ignored
                     // (but obviously shouldn't fail silently on error either)
                     // therefore track if we already in an 'error state' and bail if so
                     if self.in_error_state {
                         return None;
-                    } else if e != ErrorKind::Eof {
+                    } else if e.code != ErrorKind::Eof {
                         self.in_error_state = true;
                         return Some(Err(format!(
                             "Parse failed: {:?}, buffer context {:?}",
-                            e,
+                            e.code,
                             &self.buffer[self.bufstart..self.bufstart + 20]
                         )
                         .into()));
@@ -288,7 +288,9 @@ named!(
 #[inline]
 fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
-        IResult::Err(Err::Incomplete(Needed::Size(6)))
+        IResult::Err(Err::Incomplete(Needed::Size(unsafe {
+            NonZero::new_unchecked(6)
+        })))
     } else {
         let res = ((i[0] as u64) << 40)
             + ((i[1] as u64) << 32)
