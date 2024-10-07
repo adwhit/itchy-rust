@@ -33,7 +33,11 @@ use std::path::Path;
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
-use nom::{be_u16, be_u32, be_u64, be_u8, Err, IResult, Needed};
+use nom::{
+    error::ErrorKind,
+    number::complete::{be_u16, be_u32, be_u64, be_u8},
+    Err, IResult, Needed,
+};
 
 /// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
 pub type ArrayString4 = ArrayString<4>;
@@ -45,15 +49,13 @@ use enums::parse_issue_subtype;
 pub use enums::*;
 use errors::*;
 
-pub use enums::*;
-
 mod enums;
 
 pub mod errors {
     error_chain! {
         foreign_links {
             Io(::std::io::Error);
-            Nom(::nom::Err<u8, u32>);
+            Nom(::nom::Err<u32>);
         }
     }
 }
@@ -154,18 +156,18 @@ impl<R: Read> Iterator for MessageStream<R> {
                     self.in_error_state = false;
                     return Some(Ok(msg));
                 }
-                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+                Err(Err::Error((_, e))) | Err(Err::Failure((_, e))) => {
                     // We need to inform user of error, but don't want to get
                     // stuck in an infinite loop if error is ignored
                     // (but obviously shouldn't fail silently on error either)
                     // therefore track if we already in an 'error state' and bail if so
                     if self.in_error_state {
                         return None;
-                    } else {
+                    } else if e != ErrorKind::Eof {
                         self.in_error_state = true;
                         return Some(Err(format!(
                             "Parse failed: {:?}, buffer context {:?}",
-                            e.into_error_kind(),
+                            e,
                             &self.buffer[self.bufstart..self.bufstart + 20]
                         )
                         .into()));
@@ -385,7 +387,7 @@ named!(
             >> timestamp: be_u48
             >> body: switch!(
                 value!(tag),
-                b'A' => map!(apply!(parse_add_order, false), |order| Body::AddOrder(order)) |
+                b'A' => map!(call!(parse_add_order, false), |order| Body::AddOrder(order)) |
                 b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
                 b'C' => do_parse!(
                     reference: be_u64
@@ -406,7 +408,7 @@ named!(
                         >> executed: be_u32
                         >> match_number: be_u64
                         >> (Body::OrderExecuted{ reference, executed, match_number })) |
-                b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
+                b'F' => map!(call!(parse_add_order, true), |order| Body::AddOrder(order)) |
                 b'H' => call!(parse_trading_action) |
                 b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
                 b'J' => do_parse!(
@@ -1019,9 +1021,10 @@ mod tests {
     fn handle_msg(ix: usize, msg: Result<Message>) {
         match msg {
             Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-            Ok(_) => {
+            Ok(msg) => {
                 if ix % 1_000_000 == 0 {
-                    println!("Processed {}M messages", ix / 1000000)
+                    println!("Processed {}M messages", ix / 1000000);
+                    println!("{:?}", msg)
                 }
             }
         }
