@@ -1,7 +1,7 @@
 [package]
 name = "itchy"
 authors = ["Alex Whitney <adwhit@fastmail.com>"]
-version = "0.2.4"
+version = "0.3.0"
 description = "Nom-based parser library for NASDAQ ITCH protocol"
 repository = "https://github.com/adwhit/itchy-rust"
 keywords = ["nasdaq", "itch", "nom"]
