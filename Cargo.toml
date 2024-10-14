@@ -6,15 +6,18 @@ description = "Nom-based parser library for NASDAQ ITCH protocol"
 repository = "https://github.com/adwhit/itchy-rust"
 keywords = ["nasdaq", "itch", "nom"]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-arrayvec = "0.7.2"
-decimal = "2.0"
-error-chain = "0.12"
+arrayvec = "0.7.6"
 flate2 = "1.0"
 nom = "6.2.2"
+rust_decimal = { version = "1.36.0", default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive"] }
+thiserror = "1"
 
 [features]
-serde = ["dep:serde", "arrayvec/serde"]
+serde = ["dep:serde", "arrayvec/serde", "rust_decimal/serde"]
+
+[dev-dependencies]
+serde_json = "1.0.128"

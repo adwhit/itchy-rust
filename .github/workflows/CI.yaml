@@ -22,8 +22,8 @@ jobs:
         with:
           command: test
 
-      - name: Test compiles with serde
+      - name: Test with serde
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-run --features serde
+          args: --features serde

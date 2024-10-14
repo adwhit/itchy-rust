@@ -18,14 +18,8 @@
 //! The protocol specification can be found on the [NASDAQ website](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf)
 
 #[macro_use]
-extern crate error_chain;
-#[macro_use]
 extern crate nom;
-extern crate arrayvec;
-extern crate decimal;
-extern crate flate2;
 
-pub use decimal::d128;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -47,18 +41,21 @@ pub type ArrayString8 = ArrayString<8>;
 
 use enums::parse_issue_subtype;
 pub use enums::*;
-use errors::*;
+use rust_decimal::Decimal;
 
 mod enums;
 
-pub mod errors {
-    error_chain! {
-        foreign_links {
-            Io(::std::io::Error);
-            Nom(::nom::Err<u32>);
-        }
-    }
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Parse error: {0}")]
+    Parse(String),
+    #[error(transparent)]
+    Io(#[from] ::std::io::Error),
+    #[error(transparent)]
+    Nom(#[from] ::nom::Err<u32>),
 }
+
+type Result<T> = std::result::Result<T, Error>;
 
 // Size of buffer for parsing
 const BUFSIZE: usize = 8 * 1024;
@@ -165,12 +162,11 @@ impl<R: Read> Iterator for MessageStream<R> {
                         return None;
                     } else if e.code != ErrorKind::Eof {
                         self.in_error_state = true;
-                        return Some(Err(format!(
-                            "Parse failed: {:?}, buffer context {:?}",
+                        return Some(Err(Error::Parse(format!(
+                            "{:?}, buffer context {:?}",
                             e.code,
                             &self.buffer[self.bufstart..self.bufstart + 20]
-                        )
-                        .into()));
+                        ))));
                     }
                 }
                 Err(Err::Incomplete(_)) => {
@@ -188,7 +184,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                     None
                 } else {
                     self.in_error_state = true;
-                    Some(Err("Unexpected EOF".into()))
+                    Some(Err(Error::Parse("Unexpected EOF".into())))
                 }
             }
             Ok(ct) => {
@@ -219,9 +215,9 @@ impl Price4 {
     }
 }
 
-impl From<Price4> for d128 {
+impl From<Price4> for Decimal {
     fn from(val: Price4) -> Self {
-        d128::from(val.0) / d128::from(10_000)
+        Self::from(val.0) / Self::from(10_000)
     }
 }
 
@@ -242,9 +238,9 @@ impl Price8 {
     }
 }
 
-impl From<Price8> for d128 {
+impl From<Price8> for Decimal {
     fn from(val: Price8) -> Self {
-        d128::from(val.0) / d128::from(100_000_000)
+        Decimal::from(val.0) / Decimal::from(100_000_000)
     }
 }
 
@@ -304,6 +300,7 @@ fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
 
 /// An ITCH protocol message. Refer to the protocol spec for interpretation.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Message {
     /// Message Type
     pub tag: u8,
@@ -1010,14 +1007,14 @@ mod tests {
 
     #[test]
     fn test_price4() {
-        let p4: d128 = Price4(12340001).into();
-        assert_eq!(p4, d128::from_str("1234.0001").unwrap());
+        let p4: Decimal = Price4(12340001).into();
+        assert_eq!(p4, Decimal::from_str("1234.0001").unwrap());
     }
 
     #[test]
     fn test_price8() {
-        let p8: d128 = Price8(123400010002).into();
-        assert_eq!(p8, d128::from_str("1234.00010002").unwrap());
+        let p8: Decimal = Price8(123400010002).into();
+        assert_eq!(p8, Decimal::from_str("1234.00010002").unwrap());
     }
 
     fn handle_msg(ix: usize, msg: Result<Message>) {
@@ -1043,5 +1040,20 @@ mod tests {
             handle_msg(ix, msg)
         }
         assert_eq!(ct, 40030397)
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde() {
+        let msg = Message {
+            tag: 123,
+            stock_locate: 234,
+            tracking_number: 321,
+            timestamp: 3333,
+            body: Body::Breach(LevelBreached::L1),
+        };
+        let blob = serde_json::to_string(&msg).unwrap();
+        let msg_2 = serde_json::from_str(&blob).unwrap();
+        assert_eq!(msg, msg_2);
     }
 }
