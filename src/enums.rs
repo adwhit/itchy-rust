@@ -1,4 +1,4 @@
-use nom::{be_u8, IResult};
+use nom::{number::complete::be_u8, IResult};
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

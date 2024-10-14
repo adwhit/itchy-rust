@@ -26,14 +26,18 @@ extern crate decimal;
 extern crate flate2;
 
 pub use decimal::d128;
-use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
+use std::{fmt, num::NonZero};
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
-use nom::{be_u16, be_u32, be_u64, be_u8, Err, IResult, Needed};
+use nom::{
+    error::ErrorKind,
+    number::complete::{be_u16, be_u32, be_u64, be_u8},
+    Err, IResult, Needed,
+};
 
 /// Stack-allocated string of size 4 bytes (re-exported from `arrayvec`)
 pub type ArrayString4 = ArrayString<4>;
@@ -45,15 +49,13 @@ use enums::parse_issue_subtype;
 pub use enums::*;
 use errors::*;
 
-pub use enums::*;
-
 mod enums;
 
 pub mod errors {
     error_chain! {
         foreign_links {
             Io(::std::io::Error);
-            Nom(::nom::Err<u8, u32>);
+            Nom(::nom::Err<u32>);
         }
     }
 }
@@ -125,12 +127,12 @@ impl<R: Read> MessageStream<R> {
             // we need more data from the reader, but first,
             // copy the remnants back to the beginning of the buffer
             // (this should only be a few bytes)
-            assert!(self.bufstart as usize > BUFSIZE / 2); // safety check
-                                                           // TODO this appears to assume that the buffer was 'full' to start with
+            assert!(self.bufstart > BUFSIZE / 2); // safety check
+                                                  // TODO this appears to assume that the buffer was 'full' to start with
             assert!(BUFSIZE - self.bufstart < 100); // extra careful check
             {
                 let (left, right) = self.buffer.split_at_mut(self.bufstart);
-                left[..right.len()].copy_from_slice(&right[..]);
+                left[..right.len()].copy_from_slice(right);
                 self.bufstart = 0;
                 self.bufend = right.len();
             }
@@ -161,11 +163,11 @@ impl<R: Read> Iterator for MessageStream<R> {
                     // therefore track if we already in an 'error state' and bail if so
                     if self.in_error_state {
                         return None;
-                    } else {
+                    } else if e.code != ErrorKind::Eof {
                         self.in_error_state = true;
                         return Some(Err(format!(
                             "Parse failed: {:?}, buffer context {:?}",
-                            e.into_error_kind(),
+                            e.code,
                             &self.buffer[self.bufstart..self.bufstart + 20]
                         )
                         .into()));
@@ -183,7 +185,7 @@ impl<R: Read> Iterator for MessageStream<R> {
                     return None;
                 }
                 if self.in_error_state {
-                    return None;
+                    None
                 } else {
                     self.in_error_state = true;
                     Some(Err("Unexpected EOF".into()))
@@ -196,7 +198,7 @@ impl<R: Read> Iterator for MessageStream<R> {
             }
             Err(e) => {
                 if self.in_error_state {
-                    return None;
+                    None
                 } else {
                     self.in_error_state = true;
                     Some(Err(e))
@@ -217,9 +219,9 @@ impl Price4 {
     }
 }
 
-impl Into<d128> for Price4 {
-    fn into(self) -> d128 {
-        d128::from(self.0) / d128::from(10_000)
+impl From<Price4> for d128 {
+    fn from(val: Price4) -> Self {
+        d128::from(val.0) / d128::from(10_000)
     }
 }
 
@@ -240,9 +242,9 @@ impl Price8 {
     }
 }
 
-impl Into<d128> for Price8 {
-    fn into(self) -> d128 {
-        d128::from(self.0) / d128::from(100_000_000)
+impl From<Price8> for d128 {
+    fn from(val: Price8) -> Self {
+        d128::from(val.0) / d128::from(100_000_000)
     }
 }
 
@@ -286,7 +288,9 @@ named!(
 #[inline]
 fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
-        IResult::Err(Err::Incomplete(Needed::Size(6)))
+        IResult::Err(Err::Incomplete(Needed::Size(unsafe {
+            NonZero::new_unchecked(6)
+        })))
     } else {
         let res = ((i[0] as u64) << 40)
             + ((i[1] as u64) << 32)
@@ -385,7 +389,7 @@ named!(
             >> timestamp: be_u48
             >> body: switch!(
                 value!(tag),
-                b'A' => map!(apply!(parse_add_order, false), |order| Body::AddOrder(order)) |
+                b'A' => map!(call!(parse_add_order, false), Body::AddOrder) |
                 b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
                 b'C' => do_parse!(
                     reference: be_u64
@@ -406,9 +410,9 @@ named!(
                         >> executed: be_u32
                         >> match_number: be_u64
                         >> (Body::OrderExecuted{ reference, executed, match_number })) |
-                b'F' => map!(apply!(parse_add_order, true), |order| Body::AddOrder(order)) |
+                b'F' => map!(call!(parse_add_order, true), Body::AddOrder) |
                 b'H' => call!(parse_trading_action) |
-                b'I' => map!(parse_imbalance_indicator, |pii| Body::Imbalance(pii)) |
+                b'I' => map!(parse_imbalance_indicator, Body::Imbalance) |
                 b'J' => do_parse!(
                     stock: stock
                         >> ref_p: be_u32
@@ -422,14 +426,14 @@ named!(
                             lower_price: lower_p.into(),
                             extension
                         })) |
-                b'K' => map!(parse_ipo_quoting_period, |ip| Body::IpoQuotingPeriod(ip)) |
-                b'L' => map!(parse_participant_position, |pp| Body::ParticipantPosition(pp)) |
-                b'N' => map!(parse_retail_price_improvement_indicator, |pp| Body::RetailPriceImprovementIndicator(pp)) |
-                b'P' => map!(parse_noncross_trade, |nt| Body::NonCrossTrade(nt)) |
-                b'Q' => map!(parse_cross_trade, |ct| Body::CrossTrade(ct)) |
-                b'R' => map!(parse_stock_directory, |sd| Body::StockDirectory(sd)) |
+                b'K' => map!(parse_ipo_quoting_period, Body::IpoQuotingPeriod) |
+                b'L' => map!(parse_participant_position, Body::ParticipantPosition) |
+                b'N' => map!(parse_retail_price_improvement_indicator, Body::RetailPriceImprovementIndicator) |
+                b'P' => map!(parse_noncross_trade, Body::NonCrossTrade) |
+                b'Q' => map!(parse_cross_trade, Body::CrossTrade) |
+                b'R' => map!(parse_stock_directory, Body::StockDirectory) |
                 b'S' => call!(parse_system_event) |
-                b'U' => map!(parse_replace_order, |order| Body::ReplaceOrder(order)) |
+                b'U' => map!(parse_replace_order, Body::ReplaceOrder) |
                 b'V' => do_parse!(
                     l1: be_u64 >>
                         l2: be_u64 >>
@@ -443,7 +447,7 @@ named!(
                     char!('1') => {|_| LevelBreached::L1 } |
                     char!('2') => {|_| LevelBreached::L2 } |
                     char!('3') => {|_| LevelBreached::L3 }
-                ), |l| Body::Breach(l)) |
+                ), Body::Breach) |
                 b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
                                   (Body::OrderCancelled { reference, cancelled })) |
                 b'Y' => call!(parse_reg_sho_restriction))
@@ -1019,9 +1023,10 @@ mod tests {
     fn handle_msg(ix: usize, msg: Result<Message>) {
         match msg {
             Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-            Ok(_) => {
+            Ok(msg) => {
                 if ix % 1_000_000 == 0 {
-                    println!("Processed {}M messages", ix / 1000000)
+                    println!("Processed {}M messages", ix / 1000000);
+                    println!("{:?}", msg)
                 }
             }
         }
