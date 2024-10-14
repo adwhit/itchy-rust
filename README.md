@@ -6,14 +6,14 @@
 ITCH parser library for Rust. Implements the NASDAQ 5.0 spec which can be found [here](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf).
 
 It is zero-allocation (thanks [nom](http://github.com/geal/nom)!)
-pretty fast, parsing around 20M messages/second on my XPS 9370.
+and pretty fast, parsing around 20M messages/second on my not-fast laptop.
 
 ## Usage
 
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-itchy = "0.2"
+itchy = "0.3"
 ```
 
 Simple usage example:
