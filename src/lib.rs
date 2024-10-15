@@ -729,7 +729,8 @@ named!(
                 alt!(
                     char!('O') => {|_| CrossType::Opening} |
                     char!('C') => {|_| CrossType::Closing} |
-                    char!('H') => {|_| CrossType::IpoOrHalted}
+                    char!('H') => {|_| CrossType::IpoOrHalted} |
+                    char!('A') => {|_| CrossType::ExtendedTradingClose}
                 )
             >> price_variation_indicator: be_u8
             >> (ImbalanceIndicator {
