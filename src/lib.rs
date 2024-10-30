@@ -17,9 +17,7 @@
 //!
 //! The protocol specification can be found on the [NASDAQ website](http://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf)
 
-#[macro_use]
-extern crate nom;
-
+use core::str;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -27,9 +25,13 @@ use std::{fmt, num::NonZero};
 
 pub use arrayvec::ArrayString;
 use flate2::read::GzDecoder;
+use nom::branch::alt;
+use nom::bytes::streaming::take;
+use nom::character::streaming::char;
+use nom::combinator::map;
 use nom::{
     error::ErrorKind,
-    number::complete::{be_u16, be_u32, be_u64, be_u8},
+    number::streaming::{be_u16, be_u32, be_u64, be_u8},
     Err, IResult, Needed,
 };
 
@@ -249,37 +251,33 @@ impl From<u64> for Price8 {
         Price8(v)
     }
 }
-named!(
-    char2bool<bool>,
-    alt!(
-        char!('Y') => {|_| true} |
-        char!('N') => {|_| false}
-    )
-);
 
-named!(
-    maybe_char2bool<Option<bool>>,
-    alt!(
-        char!('Y') => {|_| Some(true)} |
-        char!('N') => {|_| Some(false)} |
-        char!(' ') => {|_| None}
-    )
-);
+fn char2bool(input: &[u8]) -> IResult<&[u8], bool> {
+    alt((map(char('Y'), |_| true), map(char('N'), |_| false)))(input)
+}
 
-named!(
-    parse_etp_flag<Option<bool>>,
-    alt!(
-        char!('Y') => {|_| Some(true)} |
-        char!('N') => {|_| Some(false)} |
-        char!(' ') => {|_| None} |
-        char!('M') => {|_| Some(true)}
-    )
-);
+fn maybe_char2bool(input: &[u8]) -> IResult<&[u8], Option<bool>> {
+    alt((
+        map(char('Y'), |_| Some(true)),
+        map(char('N'), |_| Some(false)),
+        map(char(' '), |_| None),
+    ))(input)
+}
 
-named!(
-    stock<ArrayString8>,
-    map!(take_str!(8), |s| ArrayString::from(s).unwrap())
-);
+fn parse_etp_flag(input: &[u8]) -> IResult<&[u8], Option<bool>> {
+    alt((
+        map(char('Y'), |_| Some(true)),
+        map(char('N'), |_| Some(false)),
+        map(char(' '), |_| None),
+        map(char('M'), |_| Some(true)),
+    ))(input)
+}
+
+fn stock(input: &[u8]) -> IResult<&[u8], ArrayString8> {
+    map(take(8usize), |s: &[u8]| {
+        ArrayString::from(str::from_utf8(s).unwrap()).unwrap()
+    })(input)
+}
 
 #[inline]
 fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
@@ -376,87 +374,130 @@ pub enum Body {
     RetailPriceImprovementIndicator(RetailPriceImprovementIndicator),
 }
 
-named!(
-    parse_message<Message>,
-    do_parse!(
-        _length: be_u16
-            >> tag: be_u8
-            >> stock_locate: be_u16
-            >> tracking_number: be_u16
-            >> timestamp: be_u48
-            >> body: switch!(
-                value!(tag),
-                b'A' => map!(call!(parse_add_order, false), Body::AddOrder) |
-                b'B' => map!(be_u64, |match_number| Body::BrokenTrade{ match_number }) |
-                b'C' => do_parse!(
-                    reference: be_u64
-                        >> executed: be_u32
-                        >> match_number: be_u64
-                        >> printable: char2bool
-                        >> price: be_u32
-                        >> (Body::OrderExecutedWithPrice {
-                            reference,
-                            executed,
-                            match_number,
-                            printable,
-                            price: price.into()
-                        })) |
-                b'D' => map!(be_u64, |reference| Body::DeleteOrder{ reference }) |
-                b'E' => do_parse!(
-                    reference: be_u64
-                        >> executed: be_u32
-                        >> match_number: be_u64
-                        >> (Body::OrderExecuted{ reference, executed, match_number })) |
-                b'F' => map!(call!(parse_add_order, true), Body::AddOrder) |
-                b'H' => call!(parse_trading_action) |
-                b'I' => map!(parse_imbalance_indicator, Body::Imbalance) |
-                b'J' => do_parse!(
-                    stock: stock
-                        >> ref_p: be_u32
-                        >> upper_p: be_u32
-                        >> lower_p: be_u32
-                        >> extension: be_u32
-                        >> (Body::LULDAuctionCollar {
-                            stock,
-                            ref_price: ref_p.into(),
-                            upper_price: upper_p.into(),
-                            lower_price: lower_p.into(),
-                            extension
-                        })) |
-                b'K' => map!(parse_ipo_quoting_period, Body::IpoQuotingPeriod) |
-                b'L' => map!(parse_participant_position, Body::ParticipantPosition) |
-                b'N' => map!(parse_retail_price_improvement_indicator, Body::RetailPriceImprovementIndicator) |
-                b'P' => map!(parse_noncross_trade, Body::NonCrossTrade) |
-                b'Q' => map!(parse_cross_trade, Body::CrossTrade) |
-                b'R' => map!(parse_stock_directory, Body::StockDirectory) |
-                b'S' => call!(parse_system_event) |
-                b'U' => map!(parse_replace_order, Body::ReplaceOrder) |
-                b'V' => do_parse!(
-                    l1: be_u64 >>
-                        l2: be_u64 >>
-                        l3: be_u64 >>
-                        (Body::MwcbDeclineLevel {
-                            level1: l1.into(),
-                            level2: l2.into(),
-                            level3: l3.into()
-                        })) |
-                b'W' => map!(alt!(
-                    char!('1') => {|_| LevelBreached::L1 } |
-                    char!('2') => {|_| LevelBreached::L2 } |
-                    char!('3') => {|_| LevelBreached::L3 }
-                ), Body::Breach) |
-                b'X' => do_parse!(reference: be_u64 >> cancelled: be_u32 >>
-                                  (Body::OrderCancelled { reference, cancelled })) |
-                b'Y' => call!(parse_reg_sho_restriction))
-            >> (Message {
-                tag,
-                stock_locate,
-                tracking_number,
-                timestamp,
-                body
-            })
-    )
-);
+fn parse_message(input: &[u8]) -> IResult<&[u8], Message> {
+    let (input, _length) = be_u16(input)?;
+    let (input, tag) = be_u8(input)?;
+    let (input, stock_locate) = be_u16(input)?;
+    let (input, tracking_number) = be_u16(input)?;
+    let (input, timestamp) = be_u48(input)?;
+    let (input, body) = match tag {
+        b'A' => {
+            let (input, add_order) = parse_add_order(input, false)?;
+            (input, Body::AddOrder(add_order))
+        }
+        b'B' => map(be_u64, |match_number| Body::BrokenTrade { match_number })(input)?,
+        b'C' => {
+            let (input, reference) = be_u64(input)?;
+            let (input, executed) = be_u32(input)?;
+            let (input, match_number) = be_u64(input)?;
+            let (input, printable) = char2bool(input)?;
+            let (input, price) = be_u32(input)?;
+            (
+                input,
+                Body::OrderExecutedWithPrice {
+                    reference,
+                    executed,
+                    match_number,
+                    printable,
+                    price: price.into(),
+                },
+            )
+        }
+        b'D' => map(be_u64, |reference| Body::DeleteOrder { reference })(input)?,
+        b'E' => {
+            let (input, reference) = be_u64(input)?;
+            let (input, executed) = be_u32(input)?;
+            let (input, match_number) = be_u64(input)?;
+            (
+                input,
+                Body::OrderExecuted {
+                    reference,
+                    executed,
+                    match_number,
+                },
+            )
+        }
+        b'F' => {
+            let (input, add_order) = parse_add_order(input, true)?;
+            (input, Body::AddOrder(add_order))
+        }
+        b'H' => parse_trading_action(input)?,
+        b'I' => map(parse_imbalance_indicator, Body::Imbalance)(input)?,
+        b'J' => {
+            let (input, stock) = stock(input)?;
+            let (input, ref_p) = be_u32(input)?;
+            let (input, upper_p) = be_u32(input)?;
+            let (input, lower_p) = be_u32(input)?;
+            let (input, extension) = be_u32(input)?;
+            (
+                input,
+                Body::LULDAuctionCollar {
+                    stock,
+                    ref_price: ref_p.into(),
+                    upper_price: upper_p.into(),
+                    lower_price: lower_p.into(),
+                    extension,
+                },
+            )
+        }
+        b'K' => map(parse_ipo_quoting_period, Body::IpoQuotingPeriod)(input)?,
+        b'L' => map(parse_participant_position, Body::ParticipantPosition)(input)?,
+        b'N' => map(
+            parse_retail_price_improvement_indicator,
+            Body::RetailPriceImprovementIndicator,
+        )(input)?,
+        b'P' => map(parse_noncross_trade, Body::NonCrossTrade)(input)?,
+        b'Q' => map(parse_cross_trade, Body::CrossTrade)(input)?,
+        b'R' => map(parse_stock_directory, Body::StockDirectory)(input)?,
+        b'S' => parse_system_event(input)?,
+        b'U' => map(parse_replace_order, Body::ReplaceOrder)(input)?,
+        b'V' => {
+            let (input, l1) = be_u64(input)?;
+            let (input, l2) = be_u64(input)?;
+            let (input, l3) = be_u64(input)?;
+            (
+                input,
+                Body::MwcbDeclineLevel {
+                    level1: l1.into(),
+                    level2: l2.into(),
+                    level3: l3.into(),
+                },
+            )
+        }
+        b'W' => map(
+            alt((
+                map(char('1'), |_| LevelBreached::L1),
+                map(char('2'), |_| LevelBreached::L2),
+                map(char('3'), |_| LevelBreached::L3),
+            )),
+            Body::Breach,
+        )(input)?,
+        b'X' => {
+            let (input, reference) = be_u64(input)?;
+            let (input, cancelled) = be_u32(input)?;
+            (
+                input,
+                Body::OrderCancelled {
+                    reference,
+                    cancelled,
+                },
+            )
+        }
+        b'Y' => parse_reg_sho_restriction(input)?,
+        _ => unreachable!(),
+    };
+
+    Ok((
+        input,
+        Message {
+            tag,
+            stock_locate,
+            tracking_number,
+            timestamp,
+            body,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -477,90 +518,81 @@ pub struct StockDirectory {
     pub inverse_indicator: bool,
 }
 
-named!(
-    parse_system_event<Body>,
-    do_parse!(
-        event_code:
-            alt!(
-                char!('O') => { |_| EventCode::StartOfMessages } |
-                char!('S') => { |_| EventCode::StartOfSystemHours } |
-                char!('Q') => { |_| EventCode::StartOfMarketHours } |
-                char!('M') => { |_| EventCode::EndOfMarketHours } |
-                char!('E') => { |_| EventCode::EndOfSystemHours } |
-                char!('C') => { |_| EventCode::EndOfMessages }
-            )
-            >> (Body::SystemEvent { event: event_code })
-    )
-);
+fn parse_system_event(input: &[u8]) -> IResult<&[u8], Body> {
+    let (input, event_code) = alt((
+        map(char('O'), |_| EventCode::StartOfMessages),
+        map(char('S'), |_| EventCode::StartOfSystemHours),
+        map(char('Q'), |_| EventCode::StartOfMarketHours),
+        map(char('M'), |_| EventCode::EndOfMarketHours),
+        map(char('E'), |_| EventCode::EndOfSystemHours),
+        map(char('C'), |_| EventCode::EndOfMessages),
+    ))(input)?;
 
-named!(
-    parse_stock_directory<StockDirectory>,
-    do_parse!(
-        stock: stock
-            >> market_category:
-                alt!(
-                    char!('Q') => { |_| MarketCategory::NasdaqGlobalSelect } |
-                    char!('G') => { |_| MarketCategory::NasdaqGlobalMarket } |
-                    char!('S') => { |_| MarketCategory::NasdaqCapitalMarket } |
-                    char!('N') => { |_| MarketCategory::Nyse } |
-                    char!('A') => { |_| MarketCategory::NyseMkt } |
-                    char!('P') => { |_| MarketCategory::NyseArca } |
-                    char!('Z') => { |_| MarketCategory::BatsZExchange } |
-                    char!('V') => { |_| MarketCategory::InvestorsExchange } |
-                    char!(' ') => { |_| MarketCategory::Unavailable }
-                )
-            >> financial_status:
-                alt!(
-                    char!('N') => { |_| FinancialStatus::Normal } |
-                    char!('D') => { |_| FinancialStatus::Deficient } |
-                    char!('E') => { |_| FinancialStatus::Delinquent } |
-                    char!('Q') => { |_| FinancialStatus::Bankrupt } |
-                    char!('S') => { |_| FinancialStatus::Suspended } |
-                    char!('G') => { |_| FinancialStatus::DeficientBankrupt } |
-                    char!('H') => { |_| FinancialStatus::DeficientDelinquent } |
-                    char!('J') => { |_| FinancialStatus::DelinquentBankrupt } |
-                    char!('K') => { |_| FinancialStatus::DeficientDelinquentBankrupt } |
-                    char!('C') => { |_| FinancialStatus::EtpSuspended } |
-                    char!(' ') => { |_| FinancialStatus::Unavailable }
-                )
-            >> round_lot_size: be_u32
-            >> round_lots_only: char2bool
-            >> issue_classification: parse_issue_classification
-            >> issue_subtype: parse_issue_subtype
-            >> authenticity:
-                alt!(
-                    char!('P') => {|_| true} |
-                    char!('T') => {|_| false}
-                )
-            >> short_sale_threshold: maybe_char2bool
-            >> ipo_flag: maybe_char2bool
-            >> luld_ref_price_tier:
-                alt!(
-                    char!(' ') => { |_| LuldRefPriceTier::Na } |
-                    char!('1') => { |_| LuldRefPriceTier::Tier1 } |
-                    char!('2') => { |_| LuldRefPriceTier::Tier2 }
-                )
-            >> etp_flag: parse_etp_flag
-            >> etp_leverage_factor: be_u32
-            >> inverse_indicator: char2bool
-            >> (StockDirectory {
-                stock,
-                market_category,
-                financial_status,
-                round_lot_size,
-                round_lots_only,
-                issue_classification,
-                issue_subtype,
-                authenticity,
-                short_sale_threshold,
-                ipo_flag,
-                luld_ref_price_tier,
-                etp_flag,
-                etp_leverage_factor,
-                inverse_indicator
-            })
-    )
-);
+    Ok((input, Body::SystemEvent { event: event_code }))
+}
+
+fn parse_stock_directory(input: &[u8]) -> IResult<&[u8], StockDirectory> {
+    let (input, stock) = stock(input)?;
+    let (input, market_category) = alt((
+        map(char('Q'), |_| MarketCategory::NasdaqGlobalSelect),
+        map(char('G'), |_| MarketCategory::NasdaqGlobalMarket),
+        map(char('S'), |_| MarketCategory::NasdaqCapitalMarket),
+        map(char('N'), |_| MarketCategory::Nyse),
+        map(char('A'), |_| MarketCategory::NyseMkt),
+        map(char('P'), |_| MarketCategory::NyseArca),
+        map(char('Z'), |_| MarketCategory::BatsZExchange),
+        map(char('V'), |_| MarketCategory::InvestorsExchange),
+        map(char(' '), |_| MarketCategory::Unavailable),
+    ))(input)?;
+    let (input, financial_status) = alt((
+        map(char('N'), |_| FinancialStatus::Normal),
+        map(char('D'), |_| FinancialStatus::Deficient),
+        map(char('E'), |_| FinancialStatus::Delinquent),
+        map(char('Q'), |_| FinancialStatus::Bankrupt),
+        map(char('S'), |_| FinancialStatus::Suspended),
+        map(char('G'), |_| FinancialStatus::DeficientBankrupt),
+        map(char('H'), |_| FinancialStatus::DeficientDelinquent),
+        map(char('J'), |_| FinancialStatus::DelinquentBankrupt),
+        map(char('K'), |_| FinancialStatus::DeficientDelinquentBankrupt),
+        map(char('C'), |_| FinancialStatus::EtpSuspended),
+        map(char(' '), |_| FinancialStatus::Unavailable),
+    ))(input)?;
+    let (input, round_lot_size) = be_u32(input)?;
+    let (input, round_lots_only) = char2bool(input)?;
+    let (input, issue_classification) = parse_issue_classification(input)?;
+    let (input, issue_subtype) = parse_issue_subtype(input)?;
+    let (input, authenticity) = alt((map(char('P'), |_| true), map(char('T'), |_| false)))(input)?;
+    let (input, short_sale_threshold) = maybe_char2bool(input)?;
+    let (input, ipo_flag) = maybe_char2bool(input)?;
+    let (input, luld_ref_price_tier) = alt((
+        map(char(' '), |_| LuldRefPriceTier::Na),
+        map(char('1'), |_| LuldRefPriceTier::Tier1),
+        map(char('2'), |_| LuldRefPriceTier::Tier2),
+    ))(input)?;
+    let (input, etp_flag) = parse_etp_flag(input)?;
+    let (input, etp_leverage_factor) = be_u32(input)?;
+    let (input, inverse_indicator) = char2bool(input)?;
+
+    Ok((
+        input,
+        StockDirectory {
+            stock,
+            market_category,
+            financial_status,
+            round_lot_size,
+            round_lots_only,
+            issue_classification,
+            issue_subtype,
+            authenticity,
+            short_sale_threshold,
+            ipo_flag,
+            luld_ref_price_tier,
+            etp_flag,
+            etp_leverage_factor,
+            inverse_indicator,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,66 +604,72 @@ pub struct MarketParticipantPosition {
     pub market_participant_state: MarketParticipantState,
 }
 
-named!(
-    parse_participant_position<MarketParticipantPosition>,
-    do_parse!(
-        mpid: map!(take_str!(4), |s| ArrayString::from(s).unwrap())
-            >> stock: stock
-            >> primary_market_maker: char2bool
-            >> market_maker_mode:
-                alt!(
-                    char!('N') => {|_| MarketMakerMode::Normal} |
-                    char!('P') => {|_| MarketMakerMode::Passive} |
-                    char!('S') => {|_| MarketMakerMode::Syndicate} |
-                    char!('R') => {|_| MarketMakerMode::Presyndicate} |
-                    char!('L') => {|_| MarketMakerMode::Penalty}
-                )
-            >> market_participant_state:
-                alt!(
-                    char!('A') => {|_| MarketParticipantState::Active} |
-                    char!('E') => {|_| MarketParticipantState::Excused} |
-                    char!('W') => {|_| MarketParticipantState::Withdrawn} |
-                    char!('S') => {|_| MarketParticipantState::Suspended} |
-                    char!('D') => {|_| MarketParticipantState::Deleted}
-                )
-            >> (MarketParticipantPosition {
-                mpid,
-                stock,
-                primary_market_maker,
-                market_maker_mode,
-                market_participant_state
-            })
-    )
-);
+fn parse_participant_position(input: &[u8]) -> IResult<&[u8], MarketParticipantPosition> {
+    let (input, mpid) = map(take(4usize), |s: &[u8]| {
+        ArrayString::from(str::from_utf8(s).unwrap()).unwrap()
+    })(input)?;
+    let (input, stock) = stock(input)?;
+    let (input, primary_market_maker) = char2bool(input)?;
+    let (input, market_maker_mode) = alt((
+        map(char('N'), |_| MarketMakerMode::Normal),
+        map(char('P'), |_| MarketMakerMode::Passive),
+        map(char('S'), |_| MarketMakerMode::Syndicate),
+        map(char('R'), |_| MarketMakerMode::Presyndicate),
+        map(char('L'), |_| MarketMakerMode::Penalty),
+    ))(input)?;
+    let (input, market_participant_state) = alt((
+        map(char('A'), |_| MarketParticipantState::Active),
+        map(char('E'), |_| MarketParticipantState::Excused),
+        map(char('W'), |_| MarketParticipantState::Withdrawn),
+        map(char('S'), |_| MarketParticipantState::Suspended),
+        map(char('D'), |_| MarketParticipantState::Deleted),
+    ))(input)?;
 
-named!(
-    parse_reg_sho_restriction<Body>,
-    do_parse!(
-        stock: stock
-            >> action:
-                alt!(
-                    char!('0') => {|_| RegShoAction::None} |
-                    char!('1') => {|_| RegShoAction::Intraday} |
-                    char!('2') => {|_| RegShoAction::Extant}
-                )
-            >> (Body::RegShoRestriction { stock, action })
-    )
-);
+    Ok((
+        input,
+        MarketParticipantPosition {
+            mpid,
+            stock,
+            primary_market_maker,
+            market_maker_mode,
+            market_participant_state,
+        },
+    ))
+}
 
-named!(
-    parse_trading_action<Body>,
-    do_parse!(
-        stock: stock >>
-            trading_state: alt!(
-                char!('H') => {|_| TradingState::Halted} |
-                char!('P') => {|_| TradingState::Paused} |
-                char!('Q') => {|_| TradingState::QuotationOnly} |
-                char!('T') => {|_| TradingState::Trading}
-            ) >> be_u8 >> // skip reserved byte
-            reason: map!(take_str!(4), |s| ArrayString::from(s).unwrap()) >>
-            (Body::TradingAction { stock, trading_state, reason })
-    )
-);
+fn parse_reg_sho_restriction(input: &[u8]) -> IResult<&[u8], Body> {
+    let (input, stock) = stock(input)?;
+    let (input, action) = alt((
+        map(char('0'), |_| RegShoAction::None),
+        map(char('1'), |_| RegShoAction::Intraday),
+        map(char('2'), |_| RegShoAction::Extant),
+    ))(input)?;
+
+    Ok((input, Body::RegShoRestriction { stock, action }))
+}
+
+fn parse_trading_action(input: &[u8]) -> IResult<&[u8], Body> {
+    let (input, stock) = stock(input)?;
+    let (input, trading_state) = alt((
+        map(char('H'), |_| TradingState::Halted),
+        map(char('P'), |_| TradingState::Paused),
+        map(char('Q'), |_| TradingState::QuotationOnly),
+        map(char('T'), |_| TradingState::Trading),
+    ))(input)?;
+    let (input, _) = be_u8(input)?; // skip reserved byte
+    let (input, reason) = map(take(4usize), |s: &[u8]| {
+        ArrayString::from(str::from_utf8(s).unwrap()).unwrap()
+    })(input)?;
+
+    Ok((
+        input,
+        Body::TradingAction {
+            stock,
+            trading_state,
+            reason,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -645,29 +683,32 @@ pub struct AddOrder {
 }
 
 fn parse_add_order(input: &[u8], attribution: bool) -> IResult<&[u8], AddOrder> {
-    do_parse!(
+    let (input, reference) = be_u64(input)?;
+    let (input, side) = alt((
+        map(char('B'), |_| Side::Buy),
+        map(char('S'), |_| Side::Sell),
+    ))(input)?;
+    let (input, shares) = be_u32(input)?;
+    let (input, stock) = stock(input)?;
+    let (input, price) = be_u32(input)?;
+    let (input, mpid) = match attribution {
+        true => map(take(4usize), |s: &[u8]| {
+            Some(ArrayString::from(str::from_utf8(s).unwrap()).unwrap())
+        })(input),
+        false => Ok((input, None)),
+    }?;
+
+    Ok((
         input,
-        reference: be_u64
-            >> side: alt!(
-                char!('B') => {|_| Side::Buy} |
-                char!('S') => {|_| Side::Sell}
-            )
-            >> shares: be_u32
-            >> stock: stock
-            >> price: be_u32
-            >> mpid: cond!(
-                attribution,
-                map!(take_str!(4), |s| ArrayString::from(s).unwrap())
-            )
-            >> (AddOrder {
-                reference,
-                side,
-                shares,
-                stock,
-                price: price.into(),
-                mpid
-            })
-    )
+        AddOrder {
+            reference,
+            side,
+            shares,
+            stock,
+            price: price.into(),
+            mpid,
+        },
+    ))
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -679,21 +720,22 @@ pub struct ReplaceOrder {
     pub price: Price4,
 }
 
-named!(
-    parse_replace_order<ReplaceOrder>,
-    do_parse!(
-        old_reference: be_u64
-            >> new_reference: be_u64
-            >> shares: be_u32
-            >> price: be_u32
-            >> (ReplaceOrder {
-                old_reference,
-                new_reference,
-                shares,
-                price: price.into()
-            })
-    )
-);
+fn parse_replace_order(input: &[u8]) -> IResult<&[u8], ReplaceOrder> {
+    let (input, old_reference) = be_u64(input)?;
+    let (input, new_reference) = be_u64(input)?;
+    let (input, shares) = be_u32(input)?;
+    let (input, price) = be_u32(input)?;
+
+    Ok((
+        input,
+        ReplaceOrder {
+            old_reference,
+            new_reference,
+            shares,
+            price: price.into(),
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -709,43 +751,42 @@ pub struct ImbalanceIndicator {
     pub price_variation_indicator: char, // TODO encode as enum somehow
 }
 
-named!(
-    parse_imbalance_indicator<ImbalanceIndicator>,
-    do_parse!(
-        paired_shares: be_u64
-            >> imbalance_shares: be_u64
-            >> imbalance_direction:
-                alt!(
-                    char!('B') => {|_| ImbalanceDirection::Buy } |
-                    char!('S') => {|_| ImbalanceDirection::Sell } |
-                    char!('N') => {|_| ImbalanceDirection::NoImbalance } |
-                    char!('O') => {|_| ImbalanceDirection::InsufficientOrders }
-                )
-            >> stock: stock
-            >> far_price: be_u32
-            >> near_price: be_u32
-            >> current_ref_price: be_u32
-            >> cross_type:
-                alt!(
-                    char!('O') => {|_| CrossType::Opening} |
-                    char!('C') => {|_| CrossType::Closing} |
-                    char!('H') => {|_| CrossType::IpoOrHalted} |
-                    char!('A') => {|_| CrossType::ExtendedTradingClose}
-                )
-            >> price_variation_indicator: be_u8
-            >> (ImbalanceIndicator {
-                paired_shares,
-                imbalance_shares,
-                imbalance_direction,
-                stock,
-                far_price: far_price.into(),
-                near_price: near_price.into(),
-                current_ref_price: current_ref_price.into(),
-                cross_type,
-                price_variation_indicator: price_variation_indicator as char
-            })
-    )
-);
+fn parse_imbalance_indicator(input: &[u8]) -> IResult<&[u8], ImbalanceIndicator> {
+    let (input, paired_shares) = be_u64(input)?;
+    let (input, imbalance_shares) = be_u64(input)?;
+    let (input, imbalance_direction) = alt((
+        map(char('B'), |_| ImbalanceDirection::Buy),
+        map(char('S'), |_| ImbalanceDirection::Sell),
+        map(char('N'), |_| ImbalanceDirection::NoImbalance),
+        map(char('O'), |_| ImbalanceDirection::InsufficientOrders),
+    ))(input)?;
+    let (input, stock) = stock(input)?;
+    let (input, far_price) = be_u32(input)?;
+    let (input, near_price) = be_u32(input)?;
+    let (input, current_ref_price) = be_u32(input)?;
+    let (input, cross_type) = alt((
+        map(char('O'), |_| CrossType::Opening),
+        map(char('C'), |_| CrossType::Closing),
+        map(char('H'), |_| CrossType::IpoOrHalted),
+        map(char('A'), |_| CrossType::ExtendedTradingClose),
+    ))(input)?;
+    let (input, price_variation_indicator) = be_u8(input)?;
+
+    Ok((
+        input,
+        ImbalanceIndicator {
+            paired_shares,
+            imbalance_shares,
+            imbalance_direction,
+            stock,
+            far_price: far_price.into(),
+            near_price: near_price.into(),
+            current_ref_price: current_ref_price.into(),
+            cross_type,
+            price_variation_indicator: price_variation_indicator as char,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -757,30 +798,30 @@ pub struct CrossTrade {
     pub cross_type: CrossType,
 }
 
-named!(
-    parse_cross_trade<CrossTrade>,
-    do_parse!(
-        shares: be_u64
-            >> stock: stock
-            >> price: be_u32
-            >> match_number: be_u64
-            >> cross_type:
-                alt!(
-                    char!('O') => {|_| CrossType::Opening} |
-                    char!('C') => {|_| CrossType::Closing} |
-                    char!('H') => {|_| CrossType::IpoOrHalted} |
-                    char!('I') => {|_| CrossType::Intraday} |
-                    char!('A') => {|_| CrossType::ExtendedTradingClose}
-                )
-            >> (CrossTrade {
-                shares,
-                stock,
-                cross_price: price.into(),
-                match_number,
-                cross_type
-            })
-    )
-);
+fn parse_cross_trade(input: &[u8]) -> IResult<&[u8], CrossTrade> {
+    let (input, shares) = be_u64(input)?;
+    let (input, stock) = stock(input)?;
+    let (input, price) = be_u32(input)?;
+    let (input, match_number) = be_u64(input)?;
+    let (input, cross_type) = alt((
+        map(char('O'), |_| CrossType::Opening),
+        map(char('C'), |_| CrossType::Closing),
+        map(char('H'), |_| CrossType::IpoOrHalted),
+        map(char('I'), |_| CrossType::Intraday),
+        map(char('A'), |_| CrossType::ExtendedTradingClose),
+    ))(input)?;
+
+    Ok((
+        input,
+        CrossTrade {
+            shares,
+            stock,
+            cross_price: price.into(),
+            match_number,
+            cross_type,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -789,23 +830,25 @@ pub struct RetailPriceImprovementIndicator {
     pub interest_flag: InterestFlag,
 }
 
-named!(
-    parse_retail_price_improvement_indicator<RetailPriceImprovementIndicator>,
-    do_parse!(
-        stock: stock
-            >> interest_flag:
-                alt!(
-                    char!('B') => {|_| InterestFlag::RPIAvailableBuySide} |
-                    char!('S') => {|_| InterestFlag::RPIAvailableSellSide} |
-                    char!('A') => {|_| InterestFlag::RPIAvailableBothSides} |
-                    char!('N') => {|_| InterestFlag::RPINoneAvailable}
-                )
-            >> (RetailPriceImprovementIndicator {
-                stock,
-                interest_flag
-            })
-    )
-);
+fn parse_retail_price_improvement_indicator(
+    input: &[u8],
+) -> IResult<&[u8], RetailPriceImprovementIndicator> {
+    let (input, stock) = stock(input)?;
+    let (input, interest_flag) = alt((
+        map(char('B'), |_| InterestFlag::RPIAvailableBuySide),
+        map(char('S'), |_| InterestFlag::RPIAvailableSellSide),
+        map(char('A'), |_| InterestFlag::RPIAvailableBothSides),
+        map(char('N'), |_| InterestFlag::RPINoneAvailable),
+    ))(input)?;
+
+    Ok((
+        input,
+        RetailPriceImprovementIndicator {
+            stock,
+            interest_flag,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -818,28 +861,29 @@ pub struct NonCrossTrade {
     pub match_number: u64,
 }
 
-named!(
-    parse_noncross_trade<NonCrossTrade>,
-    do_parse!(
-        reference: be_u64
-            >> side: alt!(
-                char!('B') => {|_| Side::Buy} |
-                char!('S') => {|_| Side::Sell}
-            )
-            >> shares: be_u32
-            >> stock: stock
-            >> price: be_u32
-            >> match_number: be_u64
-            >> (NonCrossTrade {
-                reference,
-                side,
-                shares,
-                stock,
-                price: price.into(),
-                match_number
-            })
-    )
-);
+fn parse_noncross_trade(input: &[u8]) -> IResult<&[u8], NonCrossTrade> {
+    let (input, reference) = be_u64(input)?;
+    let (input, side) = alt((
+        map(char('B'), |_| Side::Buy),
+        map(char('S'), |_| Side::Sell),
+    ))(input)?;
+    let (input, shares) = be_u32(input)?;
+    let (input, stock) = stock(input)?;
+    let (input, price) = be_u32(input)?;
+    let (input, match_number) = be_u64(input)?;
+
+    Ok((
+        input,
+        NonCrossTrade {
+            reference,
+            side,
+            shares,
+            stock,
+            price: price.into(),
+            match_number,
+        },
+    ))
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -850,25 +894,26 @@ pub struct IpoQuotingPeriod {
     pub price: Price4,
 }
 
-named!(
-    parse_ipo_quoting_period<IpoQuotingPeriod>,
-    do_parse!(
-        stock: stock
-            >> release_time: be_u32
-            >> release_qualifier:
-                alt!(
-                    char!('A') => { |_| IpoReleaseQualifier::Anticipated } |
-                    char!('C') => { |_| IpoReleaseQualifier::Cancelled }
-                )
-            >> price: be_u32
-            >> (IpoQuotingPeriod {
-                stock,
-                release_time,
-                release_qualifier,
-                price: price.into()
-            })
-    )
-);
+fn parse_ipo_quoting_period(input: &[u8]) -> IResult<&[u8], IpoQuotingPeriod> {
+    let (input, stock) = stock(input)?;
+    let (input, release_time) = be_u32(input)?;
+    let (input, release_qualifier) = alt((
+        map(char('A'), |_| IpoReleaseQualifier::Anticipated),
+        map(char('C'), |_| IpoReleaseQualifier::Cancelled),
+    ))(input)?;
+    let (input, price) = be_u32(input)?;
+
+    Ok((
+        input,
+        IpoQuotingPeriod {
+            stock,
+            release_time,
+            release_qualifier,
+            price: price.into(),
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
