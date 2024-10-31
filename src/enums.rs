@@ -1,4 +1,4 @@
-use nom::{number::complete::be_u8, IResult};
+use nom::{bytes::streaming::take, combinator::map_opt, number::streaming::be_u8, IResult};
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +63,7 @@ pub enum IssueClassification {
 }
 
 pub(crate) fn parse_issue_classification(input: &[u8]) -> IResult<&[u8], IssueClassification> {
-    map_opt!(input, be_u8, |v| {
+    map_opt(be_u8, |v| {
         use IssueClassification::*;
         Some(match v {
             b'A' => AmericanDepositaryShare,
@@ -84,7 +84,7 @@ pub(crate) fn parse_issue_classification(input: &[u8]) -> IResult<&[u8], IssueCl
             b'W' => Warrant,
             _ => return None,
         })
-    })
+    })(input)
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -151,8 +151,9 @@ pub enum IssueSubType {
 }
 
 pub(crate) fn parse_issue_subtype(input: &[u8]) -> IResult<&[u8], IssueSubType> {
-    map_opt!(input, take!(2), |v: &[u8]| {
+    map_opt(take(2usize), |v: &[u8]| {
         use IssueSubType::*;
+
         Some(match v {
             b"A " => PreferredTrustSecurities,
             b"AI" => AlphaIndexETNs,
@@ -214,7 +215,7 @@ pub(crate) fn parse_issue_subtype(input: &[u8]) -> IResult<&[u8], IssueSubType> 
             b"Z " => NotApplicable,
             _ => return None,
         })
-    })
+    })(input)
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
