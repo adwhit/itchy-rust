@@ -1097,27 +1097,29 @@ mod tests {
         assert_eq!(p8, Decimal::from_str("1234.00010002").unwrap());
     }
 
-    fn handle_msg(ix: usize, msg: Result<Message>) {
-        match msg {
-            Err(e) => panic!("Mesaage {} failed to parse: {}", ix, e),
-            Ok(msg) => {
-                if ix % 1_000_000 == 0 {
-                    println!("Processed {}M messages", ix / 1000000);
-                    println!("{:?}", msg)
-                }
-            }
-        }
-    }
-
     #[test]
     #[ignore]
     fn test_full_parse() {
         // Download sample data from ftp://emi.nasdaq.com/ITCH/
-        let stream = MessageStream::from_file("sample-data/20190830.PSX_ITCH_50").unwrap();
+        let mut stream = MessageStream::from_file("sample-data/20190830.PSX_ITCH_50").unwrap();
+        let stream_size = stream.reader_size().unwrap();
+
         let mut ct = 0;
-        for (ix, msg) in stream.enumerate() {
-            ct = ix;
-            handle_msg(ix, msg)
+        while let Some(msg) = stream.next() {
+            {
+                match msg {
+                    Err(e) => panic!("Message {} failed to parse: {}", ct, e),
+                    Ok(msg) => {
+                        let progress =
+                            (stream.bytes_read() as f32 / stream_size as f32 * 100.0).round();
+                        if ct % 1_000_000 == 0 {
+                            println!("Processed {}M messages ({}%)", ct / 1000000, progress);
+                            println!("{:?}", msg)
+                        }
+                    }
+                }
+            };
+            ct += 1;
         }
         assert_eq!(ct, 40030397)
     }
