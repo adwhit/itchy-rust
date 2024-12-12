@@ -138,6 +138,10 @@ impl<R: Read> MessageStream<R> {
         }
         Ok(self.reader.read(&mut self.buffer[self.bufend..])?)
     }
+
+    pub fn bytes_read(&self) -> usize {
+        self.bytes_read
+    }
 }
 
 impl<R: Read> Iterator for MessageStream<R> {
@@ -203,6 +207,36 @@ impl<R: Read> Iterator for MessageStream<R> {
                 }
             }
         }
+    }
+}
+
+/// Trait for readers that can report their size.
+pub trait KnownSizeReader {
+    /// Returns the size of the reader in bytes.
+    ///
+    /// Note: This function is not guaranteed to be fast. Cache the result if you need to call it multiple times.
+    fn size(&self) -> Result<u64>;
+}
+
+impl KnownSizeReader for File {
+    fn size(&self) -> Result<u64> {
+        Ok(self.metadata()?.len())
+    }
+}
+
+impl KnownSizeReader for GzDecoder<File> {
+    fn size(&self) -> Result<u64> {
+        Ok(self.get_ref().metadata()?.len())
+    }
+}
+
+impl<R> MessageStream<R>
+where
+    R: KnownSizeReader,
+{
+    /// Returns the size of the underlying reader in bytes.
+    pub fn reader_size(&self) -> Result<u64> {
+        self.reader.size()
     }
 }
 
