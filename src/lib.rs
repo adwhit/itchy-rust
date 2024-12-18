@@ -1076,6 +1076,7 @@ mod tests {
     #[ignore]
     fn test_full_parse() {
         // Download sample data from ftp://emi.nasdaq.com/ITCH/
+        let mut stream = MessageStream::from_file("sample-data/20190830.PSX_ITCH_50").unwrap();
         let stream_size = stream.get_ref().metadata().unwrap().len();
 
         let mut ct = 0;
