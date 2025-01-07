@@ -147,6 +147,11 @@ impl<R: Read> MessageStream<R> {
     pub fn get_ref(&self) -> &R {
         &self.reader
     }
+
+    /// Returns a mutable reference to the underlying reader.
+    pub fn get_mut(&mut self) -> &mut R {
+        &mut self.reader
+    }
 }
 
 impl<R: Read> Iterator for MessageStream<R> {
